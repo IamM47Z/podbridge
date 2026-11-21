@@ -1,0 +1,40 @@
+pr	head	verdict	reason
+382	9b126892e73a06e78fb7f56974c3c8ff06f54cb5	upstream	merged into linux/rust before the fork
+443	0d2ce86b88b814abadd424158f1fbdc8439a6be1	upstream	merged into linux/rust before the fork
+447	2f14d74fbd4cb1f304e2657f115cf9869533bf77	upstream	merged into linux/rust before the fork
+469	e0df366cdfbeb4559802ca0b9e9e94f70c613d17	upstream	merged into linux/rust before the fork
+495	e94414c4febb393b50dd5e1dd6013d527f6eb293	upstream	merged into linux/rust before the fork
+586	8c6bb40f31a5f1697f8bbe993786c0ceaa597fce	closed	closed upstream
+597	1eb5330fc61706c15965c7d21ed7c975f3e833b2	skipped	popup animation from 180 PNG frames; bypasses the in-ear takeover guard
+617	e082fe19da1fe861ed5eabc0671ad1fe1c8cb765	skipped	AirPods Max feature; forces L2CAP security and notify-send for every model
+634	9e953a7c8277738b36be75e1084a0386ba2ef0dd	partial	settings-folder fix redone by hand, keeping the migration check
+641	e9470e2b44d8d705c1021e9528586f5bce08b8d5	skipped	only helps headless mode
+655	99b0e580a93f2a26647f89816895ca1e5f70a3ec	skipped	hi-res mic v1, broke A2DP for a tester; superseded by #888/#926
+665	d7454b477b773a5aaccfe37a4c44999f1dea3933	merged	in linux/rust-maintained
+685	34e366964ee8eb916db5218cdaaba74c94e87a1d	skipped	duplicates our A2DP recovery fix
+686	be3618e8c4eb1a9ab71011e933b7479f7273cf76	skipped	duplicates our A2DP recovery fix
+687	2fca00669f9c24d13e41b67c6d1ec75a0337793f	skipped	duplicates our A2DP recovery fix
+688	6766763a00d879aa5466e016bc5aa89b6c517c76	merged	in linux/rust-maintained
+689	99cd3adf23084479989739935255b4ea6e14be57	skipped	same fix as #896, conflicts with it
+714	2cecbd5d0e73a2192d0b83e9fa63233086f5b8d4	skipped	opt-in flag to hide the tray icon; not needed
+724	226d42f85485df7b1440e4bd77f26f56242350ad	merged	in linux/rust-maintained
+733	789e18668d7d837bcfc55260527e770d0df2b753	merged	in linux/rust-maintained
+740	f77073931c363f3666912a273a04b19868b70f27	skipped	965-line hotkey settings refactor; adds Ctrl+Q quit
+766	fbfad7b5160d532fbbfbb23b3801f39faedc3555	skipped	codec option overlaps our A2DP code; optional
+774	96344dae683465e4b5ca036b62d1d08c79be9aff	closed	closed upstream
+775	73c60ae17ca3fc585c7f2b8e3e74aa5362efb5fd	merged	in linux/rust-maintained
+841	7e125c88c53703d3e13c3ee6886954c5badfd092	skipped	experimental handoff prototype; count-byte change unconfirmed (our logs parse fine with payload[2])
+859	6486178ac56bf180ee6bf86f7c28424bbcc1c5ba	skipped	AirPods 5 case battery; duplicates merged fixes, extra LE scans; author offers a split
+871	107ebb839c9cbbf38c605b51c4e10e51240b4567	skipped	8.7k-line rewrite, commits cannot be split
+877	56d5d478904e7b39027976214aa43ec4c3a4540a	partial	item 1 ported by hand; items 2-4 overlap our LE fix or rewrite le.rs
+888	d12d4111eca85e69c6993d3fc015991f0eefec8b	merged	in linux/rust-maintained via #926
+892	e1f5724ad55799c18b8ca2fb29e0fd9d9458c8a1	skipped	14.7k lines across Linux/Android/Nix from an untrusted account
+896	1024194fdaa52e477227d2558462c18dbfe3baf4	merged	in linux/rust-maintained
+897	37f6bf828aa22a219ba8009e7d0a5723fb80cdc6	merged	in linux/rust-maintained
+919	8269555c51547a0c8996abe540c4e41e599639eb	partial	81932c8 and 2d2bbf5 cherry-picked; other commits duplicate our LE fixes or turn auto-connect off
+926	5d6a54c981c9c2710ad0507b3e18b345d0269707	merged	in linux/rust-maintained; live Teams call tested
+927	0b8c36d125a5a4e5d7de0f78b4390e8cf3b7aa41	skipped	Nothing earbuds only
+928	dcbb3ee3426843fa219c86374ddfc77eb57a85a4	merged	in linux/rust-maintained
+929	78171f66237ba0fc01d1eda01dd0c48830a7a29f	merged	in linux/rust-maintained
+934	27de0a9f4209c531ad554d550d26bab09aa59c7b	partial	packet bounds checks and key redaction copied; rest is COSMIC/UI/deps in mixed commits
+936	670a4ea8102f96c74c9b4fce03e8fc765aa06646	merged	own PR, closed upstream; kept in linux/rust-maintained
