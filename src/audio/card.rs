@@ -108,7 +108,9 @@ pub fn best_headset_profile(card: &str) -> Option<String> {
         move |result| {
             if let ListResult::Item(item) = result {
                 for p in item.profiles.iter() {
-                    let Some(name) = p.name.as_ref() else { continue };
+                    let Some(name) = p.name.as_ref() else {
+                        continue;
+                    };
                     if !p.available || p.n_sources == 0 || !name.starts_with("headset-head-unit") {
                         continue;
                     }
@@ -339,7 +341,10 @@ pub fn move_streams_to_card(streams: &[SavedStream], card_index: u32, wait: Dura
             break s;
         }
         if Instant::now() >= deadline {
-            warn!("[pw] no sink for card {} yet; not moving streams back", card_index);
+            warn!(
+                "[pw] no sink for card {} yet; not moving streams back",
+                card_index
+            );
             return;
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -466,7 +471,10 @@ pub fn refresh_default(kind: DefaultKind, name: &str) {
         };
         wait_op(&mut mainloop, &op);
     };
-    debug!("[pw] refreshing default {:?} {} (via {})", kind, name, other);
+    debug!(
+        "[pw] refreshing default {:?} {} (via {})",
+        kind, name, other
+    );
     set(&other);
     std::thread::sleep(Duration::from_millis(150));
     set(name);

@@ -237,7 +237,8 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                                         .arg(matched_airpods_mac.as_ref().unwrap())
                                                         .output()
                                                         .await;
-                                                let connected = matches!(&output, Ok(o) if o.status.success());
+                                                let connected =
+                                                    matches!(&output, Ok(o) if o.status.success());
                                                 match output {
                                                     Ok(output) => {
                                                         if output.status.success() {
@@ -274,10 +275,17 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                                     // Retry on a later advert, but not on
                                                     // every one: they arrive constantly.
                                                     drop(cm);
-                                                    let connecting = Arc::clone(&connecting_macs_clone);
+                                                    let connecting =
+                                                        Arc::clone(&connecting_macs_clone);
                                                     tokio::spawn(async move {
-                                                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                                                        connecting.lock().await.remove(&real_address);
+                                                        tokio::time::sleep(
+                                                            std::time::Duration::from_secs(30),
+                                                        )
+                                                        .await;
+                                                        connecting
+                                                            .lock()
+                                                            .await
+                                                            .remove(&real_address);
                                                     });
                                                 }
                                             } else {

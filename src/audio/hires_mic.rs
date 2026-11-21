@@ -12,8 +12,8 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle as TokioHandle;
 
-use crate::audio::eld::{ELD_CHANNELS, ELD_FRAME_SAMPLES, ELD_SAMPLE_RATE, EldDecoder};
 use crate::audio::card::NOT_WORN_GRACE;
+use crate::audio::eld::{ELD_CHANNELS, ELD_FRAME_SAMPLES, ELD_SAMPLE_RATE, EldDecoder};
 use crate::audio::output::{self, Output, VirtualMic};
 use crate::bluetooth::aacp::AACPManager;
 use crate::bluetooth::aacp_audio;
@@ -255,12 +255,16 @@ fn card_name(addr: &str) -> String {
 /// Blocking.
 fn enter_fallback(addr: &str) -> Fallback {
     let card = card_name(addr);
-    let previous_profile = crate::audio::card::active_profile(crate::audio::card::CardRef::Name(&card));
+    let previous_profile =
+        crate::audio::card::active_profile(crate::audio::card::CardRef::Name(&card));
     HEADSET_FALLBACK_ACTIVE.store(true, Ordering::Relaxed);
     match crate::audio::card::best_headset_profile(&card) {
         Some(profile) => {
             if crate::audio::card::set_profile(crate::audio::card::CardRef::Name(&card), &profile) {
-                info!("[hires] AirPods stream unavailable; card on {} meanwhile", profile);
+                info!(
+                    "[hires] AirPods stream unavailable; card on {} meanwhile",
+                    profile
+                );
             }
         }
         None => error!("[hires] no headset profile to fall back to on {}", card),
@@ -303,7 +307,11 @@ fn start_feed(addr: &str) -> Option<std::process::Child> {
                     break;
                 }
                 pcm.clear();
-                pcm.extend(buf[..n - n % 2].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])));
+                pcm.extend(
+                    buf[..n - n % 2]
+                        .chunks_exact(2)
+                        .map(|b| i16::from_le_bytes([b[0], b[1]])),
+                );
                 if output.write(&pcm).is_err() {
                     break;
                 }
@@ -327,7 +335,10 @@ fn leave_fallback(mut fallback: Fallback, addr: &str, restore_profile: bool) {
             .filter(|p| p.starts_with("a2dp"))
             .unwrap_or_else(|| "a2dp-sink".to_string());
         crate::audio::card::set_profile(crate::audio::card::CardRef::Name(&card), &profile);
-        info!("[hires] back on {}; the next recording tries the AirPods stream first", profile);
+        info!(
+            "[hires] back on {}; the next recording tries the AirPods stream first",
+            profile
+        );
     }
     HEADSET_FALLBACK_ACTIVE.store(false, Ordering::Relaxed);
 }
@@ -400,8 +411,8 @@ async fn monitor_loop(
         } else if out_since.is_none() {
             out_since = Some(Instant::now());
         }
-        let worn = worn_now
-            || (seen_worn && out_since.is_some_and(|t| t.elapsed() < NOT_WORN_GRACE));
+        let worn =
+            worn_now || (seen_worn && out_since.is_some_and(|t| t.elapsed() < NOT_WORN_GRACE));
 
         // Bring apps back to the virtual mic as soon as a bud is back.
         if worn_now && !shown && ear_known {
@@ -430,7 +441,10 @@ async fn monitor_loop(
                 // reconnect. Recreate it after two polls in a row.
                 source_missing_polls += 1;
                 if source_missing_polls >= 2 {
-                    warn!("[hires] '{}' disappeared; recreating it", output::SOURCE_NAME);
+                    warn!(
+                        "[hires] '{}' disappeared; recreating it",
+                        output::SOURCE_NAME
+                    );
                     if let Some(c) = capture.take() {
                         // It writes into the old, now orphaned FIFO.
                         stop_capture(c, &aacp).await;
@@ -469,7 +483,11 @@ async fn monitor_loop(
         if let Some(fb) = fallback.as_mut() {
             if enabled && app.is_some() && worn {
                 fb.idle_since = None;
-                if fb.feed.as_mut().is_none_or(|c| c.try_wait().ok().flatten().is_some()) {
+                if fb
+                    .feed
+                    .as_mut()
+                    .is_none_or(|c| c.try_wait().ok().flatten().is_some())
+                {
                     let feed_addr = addr.clone();
                     fb.feed = blocking(move || start_feed(&feed_addr)).await.flatten();
                 }
@@ -732,7 +750,11 @@ impl Parked {
             s.push_str(&format!("default\t{d}\n"));
         }
         for r in &self.moved {
-            s.push_str(&format!("moved\t{}\t{}\n", r.index, r.app.as_deref().unwrap_or("")));
+            s.push_str(&format!(
+                "moved\t{}\t{}\n",
+                r.index,
+                r.app.as_deref().unwrap_or("")
+            ));
         }
         s
     }
@@ -768,9 +790,8 @@ static SHARED_MIC: Mutex<Option<SharedMic>> = Mutex::new(None);
 /// session manager remembers that default across a reboot. Without this file
 /// the AirPods mic would then never become the default again by itself.
 fn parked_path() -> String {
-    let dir = std::env::var("XDG_STATE_HOME").unwrap_or_else(|_| {
-        format!("{}/.local/state", std::env::var("HOME").unwrap_or_default())
-    });
+    let dir = std::env::var("XDG_STATE_HOME")
+        .unwrap_or_else(|_| format!("{}/.local/state", std::env::var("HOME").unwrap_or_default()));
     format!("{dir}/librepods/hires-mic.parked")
 }
 
@@ -816,12 +837,18 @@ fn shared_mic() -> std::sync::MutexGuard<'static, Option<SharedMic>> {
 fn park() -> Parked {
     let mut parked = Parked::default();
     let Some(fallback) = output::fallback_source(output::SOURCE_NAME) else {
-        info!("[hires] no other microphone to switch apps to; leaving them on '{}'", output::SOURCE_NAME);
+        info!(
+            "[hires] no other microphone to switch apps to; leaving them on '{}'",
+            output::SOURCE_NAME
+        );
         return parked;
     };
     if output::default_source().as_deref() == Some(output::SOURCE_NAME) {
         if output::set_default_source(&fallback) {
-            info!("[hires] AirPods mic unavailable; default microphone is now {}", fallback);
+            info!(
+                "[hires] AirPods mic unavailable; default microphone is now {}",
+                fallback
+            );
             parked.default_set = Some(fallback.clone());
             std::thread::sleep(DEFAULT_SWITCH_SETTLE);
         } else {
@@ -951,7 +978,10 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
 fn remove_mic() {
     let mic = shared_mic().take();
     if let Some(mic) = mic {
-        info!("[hires] hi-res mic turned off; removing '{}'", output::SOURCE_NAME);
+        info!(
+            "[hires] hi-res mic turned off; removing '{}'",
+            output::SOURCE_NAME
+        );
         drop(mic.vmic);
     }
     save_parked(None);
@@ -1060,7 +1090,9 @@ fn schedule_a2dp_reset(addr: &str) {
     tokio::spawn(async move {
         let requested_at = loop {
             let pending = *RESET_AT.lock().unwrap_or_else(|e| e.into_inner());
-            let Some((deadline, requested_at)) = pending else { return };
+            let Some((deadline, requested_at)) = pending else {
+                return;
+            };
             let now = Instant::now();
             if now >= deadline {
                 *RESET_AT.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -1165,8 +1197,14 @@ mod tests {
         let parked = Parked {
             default_set: Some("alsa_input.usb-mic.mono-fallback".into()),
             moved: vec![
-                Recorder { index: 117144, app: Some("WEBRTC VoiceEngine".into()) },
-                Recorder { index: 7, app: None },
+                Recorder {
+                    index: 117144,
+                    app: Some("WEBRTC VoiceEngine".into()),
+                },
+                Recorder {
+                    index: 7,
+                    app: None,
+                },
             ],
         };
         assert_eq!(Parked::parse(&parked.serialize()), parked);
@@ -1178,15 +1216,24 @@ mod tests {
     fn only_the_default_switch_survives_a_new_mic() {
         let parked = Parked {
             default_set: Some("alsa_input.usb-mic.mono-fallback".into()),
-            moved: vec![Recorder { index: 7, app: Some("app".into()) }],
+            moved: vec![Recorder {
+                index: 7,
+                app: Some("app".into()),
+            }],
         };
         let kept = carried_over(Some(parked)).expect("default switch is kept");
-        assert_eq!(kept.default_set.as_deref(), Some("alsa_input.usb-mic.mono-fallback"));
+        assert_eq!(
+            kept.default_set.as_deref(),
+            Some("alsa_input.usb-mic.mono-fallback")
+        );
         assert!(kept.moved.is_empty());
         // Nothing to undo: not parked any more.
         let moved_only = Parked {
             default_set: None,
-            moved: vec![Recorder { index: 7, app: None }],
+            moved: vec![Recorder {
+                index: 7,
+                app: None,
+            }],
         };
         assert_eq!(carried_over(Some(moved_only)), None);
         assert_eq!(carried_over(None), None);
@@ -1194,30 +1241,60 @@ mod tests {
 
     #[test]
     fn starts_only_when_enabled_recording_and_worn() {
-        assert_eq!(capture_action(true, true, true, false, false), CaptureAction::Start);
-        assert_eq!(capture_action(false, true, true, false, false), CaptureAction::Idle);
-        assert_eq!(capture_action(true, false, true, false, false), CaptureAction::Idle);
+        assert_eq!(
+            capture_action(true, true, true, false, false),
+            CaptureAction::Start
+        );
+        assert_eq!(
+            capture_action(false, true, true, false, false),
+            CaptureAction::Idle
+        );
+        assert_eq!(
+            capture_action(true, false, true, false, false),
+            CaptureAction::Idle
+        );
         // Both buds out: an app holding the mic must not start the 0x58 stream.
-        assert_eq!(capture_action(true, true, false, false, false), CaptureAction::Idle);
+        assert_eq!(
+            capture_action(true, true, false, false, false),
+            CaptureAction::Idle
+        );
     }
 
     #[test]
     fn buds_out_stops_and_never_restarts() {
-        assert_eq!(capture_action(true, true, false, true, true), CaptureAction::Stop);
-        assert_eq!(capture_action(true, true, false, true, false), CaptureAction::Stop);
+        assert_eq!(
+            capture_action(true, true, false, true, true),
+            CaptureAction::Stop
+        );
+        assert_eq!(
+            capture_action(true, true, false, true, false),
+            CaptureAction::Stop
+        );
     }
 
     #[test]
     fn app_closing_mic_or_disabling_stops() {
         // Leaving a call: recorder gone, buds still in.
-        assert_eq!(capture_action(true, false, true, true, false), CaptureAction::Stop);
+        assert_eq!(
+            capture_action(true, false, true, true, false),
+            CaptureAction::Stop
+        );
         // Feature disabled mid-capture.
-        assert_eq!(capture_action(false, true, true, true, false), CaptureAction::Stop);
+        assert_eq!(
+            capture_action(false, true, true, true, false),
+            CaptureAction::Stop
+        );
     }
 
     #[test]
     fn stall_restarts_only_while_capturing_and_worn() {
-        assert_eq!(capture_action(true, true, true, true, true), CaptureAction::Restart);
-        assert_eq!(capture_action(true, true, true, true, false), CaptureAction::Keep);
+        assert_eq!(
+            capture_action(true, true, true, true, true),
+            CaptureAction::Restart
+        );
+        assert_eq!(
+            capture_action(true, true, true, true, false),
+            CaptureAction::Keep
+        );
     }
 }

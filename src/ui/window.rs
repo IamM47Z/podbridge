@@ -629,7 +629,9 @@ impl App {
                         error!("Serialization failed: {}", e);
                         "{}".to_string()
                     });
-                    if let Err(e) = crate::utils::write_atomic(&devices_path, updated_json.as_bytes()) {
+                    if let Err(e) =
+                        crate::utils::write_atomic(&devices_path, updated_json.as_bytes())
+                    {
                         error!("Failed to write devices file: {}", e);
                     }
                     self.selected_tab = Tab::Device(addr.to_string());

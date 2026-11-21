@@ -249,7 +249,10 @@ impl ATTManager {
             dropped += 1;
         }
         if dropped > 0 {
-            debug!("Dropped {} stale ATT response(s) before new request", dropped);
+            debug!(
+                "Dropped {} stale ATT response(s) before new request",
+                dropped
+            );
         }
     }
 

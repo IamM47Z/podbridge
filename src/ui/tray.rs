@@ -343,7 +343,10 @@ mod tests {
 
         <MyTray as ksni::Tray>::activate(&mut tray, TRAY_ACTIVATION_X, TRAY_ACTIVATION_Y);
 
-        assert!(matches!(ui_rx.try_recv(), Ok(BluetoothUIMessage::OpenWindow)));
+        assert!(matches!(
+            ui_rx.try_recv(),
+            Ok(BluetoothUIMessage::OpenWindow)
+        ));
     }
 
     const TRAY_ACTIVATION_X: i32 = 0;

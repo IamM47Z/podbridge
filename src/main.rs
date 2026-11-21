@@ -23,8 +23,8 @@ use ksni::TrayMethods;
 use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::atomic::{AtomicBool};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -45,7 +45,7 @@ struct Args {
     )]
     le_debug: bool,
     #[arg(long, short = 'v', help = "Show application version and exit")]
-    version: bool
+    version: bool,
 }
 
 fn main() -> iced::Result {
@@ -245,11 +245,12 @@ async fn async_main(
         let Ok(addr) = addr_str.parse::<Address>() else {
             return true;
         };
-        if is_connected==0 {
-            if let Err(e) = ui_tx_sig.send(BluetoothUIMessage::DeviceDisconnected(addr_str.clone())) {
+        if is_connected == 0 {
+            if let Err(e) = ui_tx_sig.send(BluetoothUIMessage::DeviceDisconnected(addr_str.clone()))
+            {
                 warn!("Failed to send DeviceConnected UI message: {:?}", e);
             }
-            return true
+            return true;
         }
         if managed_devices_mac_sig.contains(&addr_str) {
             info!("Managed device connected: {}, initializing", addr_str);
@@ -259,7 +260,9 @@ async fn async_main(
                 let device_managers_sig = device_managers_sig.clone();
                 tokio::spawn(async move {
                     // Connect before taking the lock: the UI reads this map.
-                    let dev = match devices::nothing::NothingDevice::new(addr, ui_tx_clone.clone()).await {
+                    let dev = match devices::nothing::NothingDevice::new(addr, ui_tx_clone.clone())
+                        .await
+                    {
                         Ok(dev) => dev,
                         Err(e) => {
                             warn!("Could not set up Nothing device {}: {}", addr_str, e);
@@ -273,7 +276,9 @@ async fn async_main(
                         .or_insert(dev_managers)
                         .set_att(dev.att_manager);
                     drop(managers);
-                    if let Err(e) = ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str.clone())) {
+                    if let Err(e) =
+                        ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str.clone()))
+                    {
                         warn!("Failed to send DeviceConnected UI message: {:?}", e);
                     }
                 });
@@ -296,7 +301,10 @@ async fn async_main(
         let connecting = connecting_sig.clone();
         tokio::spawn(async move {
             if !begin_setup(&connecting, &addr_str) {
-                info!("Already setting up {}; ignoring duplicate connect", addr_str);
+                info!(
+                    "Already setting up {}; ignoring duplicate connect",
+                    addr_str
+                );
                 return;
             }
             close_stale_link(&device_managers_sig, &addr_str).await;
@@ -315,16 +323,19 @@ async fn async_main(
             if !channel_up {
                 // Don't show a device whose controls can't work; the next
                 // connect signal from BlueZ sets it up again.
-                warn!("{} has no AACP channel; not showing it as connected", addr_str);
+                warn!(
+                    "{} has no AACP channel; not showing it as connected",
+                    addr_str
+                );
                 return;
             }
-            if let Err(e) = ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str.clone())) {
+            if let Err(e) = ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str.clone()))
+            {
                 warn!("Failed to send DeviceConnected UI message: {:?}", e);
             }
         });
         true
     })?;
-
 
     info!("Checking for connected devices...");
     match find_connected_airpods(&adapter).await {
@@ -364,7 +375,10 @@ async fn async_main(
             drop(managers);
             end_setup(&connecting, &mac_str);
             if !channel_up {
-                warn!("{} has no AACP channel; not showing it as connected", mac_str);
+                warn!(
+                    "{} has no AACP channel; not showing it as connected",
+                    mac_str
+                );
             } else if let Err(e) = ui_tx.send(BluetoothUIMessage::DeviceConnected(
                 device.address().to_string(),
             )) {
@@ -414,7 +428,9 @@ async fn async_main(
                             .entry(addr_str.clone())
                             .or_insert(dev_managers)
                             .set_att(dev.att_manager);
-                        if let Err(e) = ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str)) {
+                        if let Err(e) =
+                            ui_tx_clone.send(BluetoothUIMessage::DeviceConnected(addr_str))
+                        {
                             warn!("Failed to send DeviceConnected UI message: {:?}", e);
                         }
                     }
@@ -472,7 +488,10 @@ async fn close_stale_link(
     if let Some(old) = old
         && old.is_connected()
     {
-        info!("{} connected again while the old AACP link looked alive; closing it", mac);
+        info!(
+            "{} connected again while the old AACP link looked alive; closing it",
+            mac
+        );
         old.close().await;
     }
 }
@@ -514,7 +533,11 @@ fn acquire_instance_lock(start_minimized: bool) -> Result<Option<std::fs::File>,
     {
         Ok(f) => f,
         Err(e) => {
-            warn!("Could not open {}: {}; skipping single-instance check", path.display(), e);
+            warn!(
+                "Could not open {}: {}; skipping single-instance check",
+                path.display(),
+                e
+            );
             return Ok(None);
         }
     };
@@ -532,13 +555,22 @@ fn acquire_instance_lock(start_minimized: bool) -> Result<Option<std::fs::File>,
             if start_minimized {
                 info!("LibrePods is already running (pid {}); exiting", pid);
             } else if !pid.is_empty() {
-                info!("LibrePods is already running (pid {}); asking it to open its window", pid);
-                let _ = std::process::Command::new("kill").args(["-USR1", pid]).status();
+                info!(
+                    "LibrePods is already running (pid {}); asking it to open its window",
+                    pid
+                );
+                let _ = std::process::Command::new("kill")
+                    .args(["-USR1", pid])
+                    .status();
             }
             Err(())
         }
         Err(std::fs::TryLockError::Error(e)) => {
-            warn!("Could not lock {}: {}; skipping single-instance check", path.display(), e);
+            warn!(
+                "Could not lock {}: {}; skipping single-instance check",
+                path.display(),
+                e
+            );
             Ok(Some(file))
         }
     }

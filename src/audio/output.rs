@@ -47,7 +47,11 @@ fn wireplumber_autoswitch() -> Option<bool> {
 
 fn set_wireplumber_autoswitch(on: bool) -> bool {
     std::process::Command::new("wpctl")
-        .args(["settings", AUTOSWITCH_KEY, if on { "true" } else { "false" }])
+        .args([
+            "settings",
+            AUTOSWITCH_KEY,
+            if on { "true" } else { "false" },
+        ])
         .status()
         .is_ok_and(|s| s.success())
 }
@@ -72,7 +76,11 @@ pub fn restore_wireplumber_mic() {
 /// loopback; the SCO node itself is internal), for an AirPods address.
 pub fn headset_source(addr: &str) -> Option<String> {
     let (mut mainloop, context) = connect()?;
-    let wanted: String = addr.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_ascii_uppercase();
+    let wanted: String = addr
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .collect::<String>()
+        .to_ascii_uppercase();
     let found: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     let op = context.introspect().get_source_info_list({
         let found = found.clone();
@@ -82,7 +90,11 @@ pub fn headset_source(addr: &str) -> Option<String> {
                 && let Some(name) = item.name.as_ref()
                 && name.starts_with("bluez_input.")
             {
-                let hex: String = name.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_ascii_uppercase();
+                let hex: String = name
+                    .chars()
+                    .filter(|c| c.is_ascii_hexdigit())
+                    .collect::<String>()
+                    .to_ascii_uppercase();
                 if hex.contains(&wanted) && found.borrow().is_none() {
                     *found.borrow_mut() = Some(name.to_string());
                 }
@@ -100,7 +112,8 @@ pub fn headset_source(addr: &str) -> Option<String> {
 /// AirPods already take about 300 ms to send their first frame). Process-wide;
 /// the target is replaced on every call.
 pub fn watch_recorders(wake: std::sync::Arc<tokio::sync::Notify>) {
-    static TARGET: std::sync::Mutex<Option<std::sync::Arc<tokio::sync::Notify>>> = std::sync::Mutex::new(None);
+    static TARGET: std::sync::Mutex<Option<std::sync::Arc<tokio::sync::Notify>>> =
+        std::sync::Mutex::new(None);
     static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     *TARGET.lock().unwrap_or_else(|e| e.into_inner()) = Some(wake);
     if STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -108,25 +121,28 @@ pub fn watch_recorders(wake: std::sync::Arc<tokio::sync::Notify>) {
     }
     let _ = std::thread::Builder::new()
         .name("recorder-watch".into())
-        .spawn(|| loop {
-            if let Some((mut mainloop, mut context)) = connect() {
-                use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
-                context.set_subscribe_callback(Some(Box::new(|facility, _, _| {
-                    if facility == Some(Facility::SourceOutput)
-                        && let Some(w) = TARGET.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-                    {
-                        w.notify_one();
-                    }
-                })));
-                context.subscribe(InterestMaskSet::SOURCE_OUTPUT, |_| {});
-                while let IterateResult::Success(_) = mainloop.iterate(true) {
-                    if context.get_state() != libpulse_binding::context::State::Ready {
-                        break;
+        .spawn(|| {
+            loop {
+                if let Some((mut mainloop, mut context)) = connect() {
+                    use libpulse_binding::context::subscribe::{Facility, InterestMaskSet};
+                    context.set_subscribe_callback(Some(Box::new(|facility, _, _| {
+                        if facility == Some(Facility::SourceOutput)
+                            && let Some(w) =
+                                TARGET.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+                        {
+                            w.notify_one();
+                        }
+                    })));
+                    context.subscribe(InterestMaskSet::SOURCE_OUTPUT, |_| {});
+                    while let IterateResult::Success(_) = mainloop.iterate(true) {
+                        if context.get_state() != libpulse_binding::context::State::Ready {
+                            break;
+                        }
                     }
                 }
+                // The sound server went away (restart): reconnect shortly.
+                std::thread::sleep(Duration::from_secs(2));
             }
-            // The sound server went away (restart): reconnect shortly.
-            std::thread::sleep(Duration::from_secs(2));
         });
 }
 
@@ -218,7 +234,10 @@ impl VirtualMic {
             }
         }
         let module = keep?;
-        info!("[pw] reusing the hi-res mic left by an earlier run (module {})", module);
+        info!(
+            "[pw] reusing the hi-res mic left by an earlier run (module {})",
+            module
+        );
         Some(VirtualMic { module })
     }
 }
@@ -722,7 +741,10 @@ pub fn move_recorders(recorders: &[Recorder], target: &str) -> Vec<Recorder> {
     let mut introspect = context.introspect();
     let mut moved = Vec::new();
     for rec in recorders {
-        if !current.iter().any(|(r, on)| r == rec && *on != target_index) {
+        if !current
+            .iter()
+            .any(|(r, on)| r == rec && *on != target_index)
+        {
             continue;
         }
         let ok = Rc::new(Cell::new(false));

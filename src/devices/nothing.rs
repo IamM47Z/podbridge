@@ -110,7 +110,8 @@ impl NothingDevice {
                         },
                     );
                     let json = serde_json::to_string(&new_devices).unwrap();
-                    if let Err(e) = crate::utils::write_atomic(&get_devices_path(), json.as_bytes()) {
+                    if let Err(e) = crate::utils::write_atomic(&get_devices_path(), json.as_bytes())
+                    {
                         log::error!("Failed to write devices file: {}", e);
                     }
                 } else if data.starts_with(&[0x55, 0x20, 0x01, 0x06, 0x40]) {

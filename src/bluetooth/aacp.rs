@@ -498,7 +498,9 @@ impl AACPManager {
     pub async fn is_worn(&self) -> bool {
         let state = self.state.lock().await;
         state.ear_detection_status.is_empty()
-            || state.ear_detection_status.contains(&EarDetectionStatus::InEar)
+            || state
+                .ear_detection_status
+                .contains(&EarDetectionStatus::InEar)
     }
 
     /// True once the AirPods have reported an ear-detection state on this
@@ -631,7 +633,11 @@ impl AACPManager {
                 return true;
             }
             if let Some(backoff) = BACKOFF_SECS.get(attempt) {
-                warn!("AACP connect attempt {} failed; retrying in {}s", attempt + 1, backoff);
+                warn!(
+                    "AACP connect attempt {} failed; retrying in {}s",
+                    attempt + 1,
+                    backoff
+                );
                 sleep(Duration::from_secs(*backoff)).await;
             }
         }

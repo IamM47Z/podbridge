@@ -67,7 +67,9 @@ pub fn airpods_view<'a>(
                                 aacp_manager
                                     .send_rename_packet(&new_name)
                                     .await
-                                    .unwrap_or_else(|e| log::error!("Failed to send rename packet: {}", e));
+                                    .unwrap_or_else(|e| {
+                                        log::error!("Failed to send rename packet: {}", e)
+                                    });
                             }
                         });
                         let mut state = state.clone();
@@ -121,7 +123,12 @@ pub fn airpods_view<'a>(
                                         &[selected_mode_c.to_byte()],
                                     )
                                     .await
-                                    .unwrap_or_else(|e| log::error!("Failed to send Noise Control Mode command: {}", e));
+                                    .unwrap_or_else(|e| {
+                                        log::error!(
+                                            "Failed to send Noise Control Mode command: {}",
+                                            e
+                                        )
+                                    });
                             });
                             let mut state = state_clone.clone();
                             state.noise_control_mode = selected_mode.clone();
