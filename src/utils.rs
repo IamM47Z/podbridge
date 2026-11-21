@@ -38,7 +38,9 @@ pub fn migrate_from_librepods() {
 }
 
 /// Copies `old` to `new` when `old` exists and `new` does not. A temp folder renamed
-/// at the end keeps an interrupted copy from passing for a finished one.
+/// at the end keeps an interrupted copy from passing for a finished one. Entries that
+/// fail to copy are logged and skipped: other code creates the `new` folders right
+/// after, so a copy aborted here would never be retried.
 fn copy_old_app_dir(old: &Path, new: &Path) -> std::io::Result<bool> {
     if !old.is_dir() || new.exists() {
         return Ok(false);
@@ -50,15 +52,28 @@ fn copy_old_app_dir(old: &Path, new: &Path) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// Copies a folder, keeping its mode (the devices file holds pairing keys) and
+/// copying links as links. Leftover `write_atomic` temp files are skipped.
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
+    std::fs::create_dir(to)?;
+    std::fs::set_permissions(to, std::fs::metadata(from)?.permissions())?;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), target)?;
+        if entry.file_name().to_string_lossy().contains(".tmp.") {
+            continue;
+        }
+        let (source, target) = (entry.path(), to.join(entry.file_name()));
+        let copied = entry.file_type().and_then(|kind| {
+            if kind.is_symlink() {
+                std::os::unix::fs::symlink(std::fs::read_link(&source)?, &target)
+            } else if kind.is_dir() {
+                copy_dir(&source, &target)
+            } else {
+                std::fs::copy(&source, &target).map(|_| ())
+            }
+        });
+        if let Err(e) = copied {
+            log::warn!("Skipped {} while copying: {}", source.display(), e);
         }
     }
     Ok(())
@@ -399,6 +414,34 @@ mod tests {
         assert_eq!(
             fs::read_to_string(new.join("devices.json")).unwrap(),
             "{\"a\":1}"
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn links_are_copied_as_links_and_temp_files_skipped() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let base = scratch("links");
+        let (old, new) = (base.join("librepods"), base.join("podbridge"));
+        fs::create_dir_all(old.join("dir")).unwrap();
+        fs::set_permissions(&old, fs::Permissions::from_mode(0o700)).unwrap();
+        symlink("dir", old.join("to-dir")).unwrap();
+        symlink("missing", old.join("dangling")).unwrap();
+        fs::write(old.join("devices.json.tmp.1.0"), "partial").unwrap();
+
+        assert!(copy_old_app_dir(&old, &new).unwrap());
+        assert_eq!(
+            fs::read_link(new.join("to-dir")).unwrap().to_str(),
+            Some("dir")
+        );
+        assert_eq!(
+            fs::read_link(new.join("dangling")).unwrap().to_str(),
+            Some("missing")
+        );
+        assert!(!new.join("devices.json.tmp.1.0").exists());
+        assert_eq!(
+            fs::metadata(&new).unwrap().permissions().mode() & 0o777,
+            0o700
         );
         fs::remove_dir_all(base).unwrap();
     }
