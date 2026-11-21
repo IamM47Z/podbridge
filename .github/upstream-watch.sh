@@ -55,8 +55,11 @@ if [[ -n ${DRY_RUN:-} ]]; then printf '%s\n\nactionable: %s\n' "$body" "${action
 gh label create "$LABEL" -R "$REPO" --color c5def5 --description "Upstream changes to review" --force >/dev/null
 # One issue, reused: open while there is something to act on, closed otherwise.
 read -r issue state < <(gh issue list -R "$REPO" --label "$LABEL" --state all --limit 1 \
-    --json number,state -q '.[0] | "\(.number) \(.state)"') || true
-if [[ -z ${issue:-} ]]; then
+    --json number,state -q '.[0] // empty | "\(.number) \(.state)"') || true
+if [[ -z ${issue:-} && -z $actionable ]]; then
+    echo "no issue; actionable: none"
+    exit 0
+elif [[ -z ${issue:-} ]]; then
     url=$(gh issue create -R "$REPO" --title "Upstream to review" --label "$LABEL" --body "$body")
     issue=${url##*/} state=OPEN old=""
 else
