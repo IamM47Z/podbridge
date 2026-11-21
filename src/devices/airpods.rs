@@ -447,10 +447,6 @@ impl AirPodsDevice {
     }
 }
 
-/// Run a per-connection task until it finishes or the AACP connection drops,
-/// whichever comes first. These loops hold AACPManager clones (and channels the
-/// manager's state holds the other end of), so without this they never end and
-/// pile up with every reconnect.
 /// Routing audio here at connect needs both the first ear reading (is a bud
 /// in?) and the first AudioSource report (is another device using the
 /// AirPods?). They arrive in either order; this says when both are in, once.
@@ -481,6 +477,10 @@ impl ConnectRouting {
     }
 }
 
+/// Run a per-connection task until it finishes or the AACP connection drops,
+/// whichever comes first. These loops hold AACPManager clones (and channels the
+/// manager's state holds the other end of), so without this they never end and
+/// pile up with every reconnect.
 fn spawn_for_connection<F>(aacp: &AACPManager, fut: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,

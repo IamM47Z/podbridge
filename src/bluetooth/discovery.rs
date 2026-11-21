@@ -58,5 +58,14 @@ pub(crate) async fn connect_a2dp_profile(mac: &str) -> bluer::Result<()> {
         .map_err(|_| bluer::Error::from(Error::other(format!("bad address {mac}"))))?;
     let session = bluer::Session::new().await?;
     let adapter = session.default_adapter().await?;
-    adapter.device(addr)?.connect_profile(&A2DP_SINK).await
+    // Bounded: the caller holds the media controller locks while it waits.
+    let device = adapter.device(addr)?;
+    let request = device.connect_profile(&A2DP_SINK);
+    match tokio::time::timeout(std::time::Duration::from_secs(5), request).await {
+        Ok(result) => result,
+        Err(_) => Err(bluer::Error::from(Error::new(
+            std::io::ErrorKind::TimedOut,
+            "A2DP profile request timed out",
+        ))),
+    }
 }
