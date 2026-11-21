@@ -488,12 +488,22 @@ impl MediaController {
         // changes whenever the card is recreated. A WirePlumber restart is only
         // a last resort (it cuts every audio stream).
         let mut ready = false;
+        let mut a2dp_requested = false;
         for attempt in 0..A2DP_WAIT_ATTEMPTS {
             if let Some(idx) = self.get_audio_device_index(&mac).await {
                 self.state.lock().await.device_index = Some(idx);
                 if self.is_a2dp_profile_available().await {
                     ready = true;
                     break;
+                }
+                // The card is there without A2DP: BlueZ linked only the
+                // headset profile. Ask for A2DP once instead of waiting.
+                if !a2dp_requested {
+                    a2dp_requested = true;
+                    match crate::bluetooth::discovery::connect_a2dp_profile(&mac).await {
+                        Ok(()) => info!("Asked BlueZ to connect the A2DP profile"),
+                        Err(e) => warn!("Could not connect the A2DP profile: {}", e),
+                    }
                 }
             }
             debug!("A2DP not available yet (attempt {}), waiting", attempt + 1);

@@ -47,3 +47,16 @@ pub async fn find_other_managed_devices(
         "No other managed devices found",
     )))
 }
+
+/// Asks BlueZ to connect the AirPods' A2DP sink profile. After some connects
+/// BlueZ links only the headset profile, so the card has no A2DP profile until
+/// this is requested; restarting WirePlumber used to paper over that.
+pub(crate) async fn connect_a2dp_profile(mac: &str) -> bluer::Result<()> {
+    const A2DP_SINK: uuid::Uuid = uuid::Uuid::from_u128(0x0000110b_0000_1000_8000_00805f9b34fb);
+    let addr: bluer::Address = mac
+        .parse()
+        .map_err(|_| bluer::Error::from(Error::other(format!("bad address {mac}"))))?;
+    let session = bluer::Session::new().await?;
+    let adapter = session.default_adapter().await?;
+    adapter.device(addr)?.connect_profile(&A2DP_SINK).await
+}
