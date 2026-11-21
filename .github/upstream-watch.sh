@@ -12,6 +12,8 @@ BASE_FILE=${UPSTREAM_BASE_FILE:-.github/upstream-base}
 LABEL=upstream-watch
 REPO=${GITHUB_REPOSITORY:?}
 
+# shortcut: gh lists at most 100 files per PR, so a PR whose linux-rust/ files all come
+# later is missed. Upgrade: page through the PR files API when a PR shows 100 files.
 prs=$(gh pr list -R "$UPSTREAM" --base "$BASE" --state all --limit 500 \
     --json number,title,url,state,headRefOid,files |
     jq -c --arg p "$PATH_FILTER" '[.[] | select(any(.files[]; .path | startswith($p))) | del(.files)]')
@@ -30,7 +32,8 @@ report=$(jq -r --rawfile state "$STATE" '
         waiting: map(select(.state == "OPEN" and .seen != null
                             and (.seen.verdict == "waiting" or .seen.verdict == "review")))
       }
-    | def row: "- [#\(.number)](\(.url)) \(.title)";
+    # Titles are upstream input: no HTML that could hide the body, no @mentions that ping.
+    | def row: "- [#\(.number)](\(.url)) \(.title | gsub("<"; "&lt;") | gsub("@"; "@\u200b"))";
       def section(t; xs): if (xs | length) > 0 then "### \(t)\n" + (xs | map(row) | join("\n")) + "\n" else "" end;
       section("New PRs"; .new)
       + section("PRs with new commits"; .updated)
@@ -54,8 +57,10 @@ if [[ -n ${DRY_RUN:-} ]]; then printf '%s\n\nactionable: %s\n' "$body" "${action
 
 gh label create "$LABEL" -R "$REPO" --color c5def5 --description "Upstream changes to review" --force >/dev/null
 # One issue, reused: open while there is something to act on, closed otherwise.
-read -r issue state < <(gh issue list -R "$REPO" --label "$LABEL" --state all --limit 1 \
-    --json number,state -q '.[0] // empty | "\(.number) \(.state)"') || true
+# A failed lookup must stop the run: going on would open a second issue.
+found=$(gh issue list -R "$REPO" --label "$LABEL" --state all --limit 1 \
+    --json number,state -q '.[0] // empty | "\(.number) \(.state)"')
+read -r issue state <<<"$found" || true
 if [[ -z ${issue:-} && -z $actionable ]]; then
     echo "no issue; actionable: none"
     exit 0
