@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      APP: podbridge
+      APP_ID: io.github.iamm47z.podbridge
+      LINUXDEPLOY_URL: https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+      LINUXDEPLOY_SHA256: c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      # The runners have no FUSE, so the AppImage tools unpack themselves instead.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config clang libdbus-1-dev libpulse-dev \
+            libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev \
+            libavdevice-dev libswresample-dev libswscale-dev
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          stage="$APP-$GITHUB_REF_NAME-x86_64-linux"
+          mkdir "$stage"
+          cp "target/release/$APP" LICENSE NOTICE README.md \
+            "assets/$APP_ID.desktop" assets/icon.png "$stage/"
+          tar -czf "dist/$stage.tar.gz" "$stage"
+
+          curl -fsSLo linuxdeploy "$LINUXDEPLOY_URL"
+          curl -fsSLo appimagetool "$APPIMAGETOOL_URL"
+          printf '%s  linuxdeploy\n%s  appimagetool\n' \
+            "$LINUXDEPLOY_SHA256" "$APPIMAGETOOL_SHA256" | sha256sum -c -
+          chmod +x linuxdeploy appimagetool
+
+          # linuxdeploy names the icon after its file, which must match Icon= in the desktop file.
+          cp assets/icon.png "$APP_ID.png"
+          ./linuxdeploy --appdir AppDir --executable "target/release/$APP" \
+            --desktop-file "assets/$APP_ID.desktop" --icon-file "$APP_ID.png"
+          ARCH=x86_64 ./appimagetool AppDir "dist/$APP-$GITHUB_REF_NAME-x86_64.AppImage"
+
+          (cd dist && sha256sum -- * > SHA256SUMS)
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          [[ $GITHUB_REF_NAME == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes "${flags[@]}"
