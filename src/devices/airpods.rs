@@ -264,8 +264,30 @@ impl AirPodsDevice {
         let ui_tx_clone = ui_tx.clone();
         let command_tx_clone = command_tx.clone();
         spawn_for_connection(&aacp_manager, async move {
+            let mut connect_routing = ConnectRouting::default();
             while let Some(event) = rx.recv().await {
                 let event_clone = event.clone();
+                let connect_check = match &event {
+                    AACPEvent::EarDetection(old, _) if old.is_empty() => {
+                        connect_routing.note_first_ear()
+                    }
+                    AACPEvent::AudioSource(_) => connect_routing.note_source(),
+                    _ => false,
+                };
+                if connect_check
+                    && aacp_manager_clone_events.is_worn().await
+                    && !aacp_manager_clone_events
+                        .other_device_using_audio(&local_mac_events)
+                        .await
+                {
+                    info!(
+                        "Connected while worn and no other device uses the AirPods; routing audio here"
+                    );
+                    let mc = mc_clone.clone();
+                    spawn_for_connection(&aacp_manager_clone_events, async move {
+                        mc.lock().await.activate_a2dp_profile_on_connect().await;
+                    });
+                }
                 match event {
                     AACPEvent::EarDetection(old_status, new_status) => {
                         debug!(
@@ -432,6 +454,36 @@ impl AirPodsDevice {
 /// whichever comes first. These loops hold AACPManager clones (and channels the
 /// manager's state holds the other end of), so without this they never end and
 /// pile up with every reconnect.
+/// Routing audio here at connect needs both the first ear reading (is a bud
+/// in?) and the first AudioSource report (is another device using the
+/// AirPods?). They arrive in either order; this says when both are in, once.
+#[derive(Default)]
+struct ConnectRouting {
+    ear_seen: bool,
+    source_seen: bool,
+    done: bool,
+}
+
+impl ConnectRouting {
+    fn note_first_ear(&mut self) -> bool {
+        self.ear_seen = true;
+        self.ready()
+    }
+
+    fn note_source(&mut self) -> bool {
+        self.source_seen = true;
+        self.ready()
+    }
+
+    fn ready(&mut self) -> bool {
+        if self.done || !self.ear_seen || !self.source_seen {
+            return false;
+        }
+        self.done = true;
+        true
+    }
+}
+
 fn spawn_for_connection<F>(aacp: &AACPManager, fut: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
@@ -459,4 +511,23 @@ pub struct AirPodsInformation {
     pub right_serial_number: String,
     pub version3: String,
     pub le_keys: AirPodsLEKeys,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectRouting;
+
+    #[test]
+    fn connect_routing_fires_once_after_both_first_reports() {
+        let mut g = ConnectRouting::default();
+        assert!(!g.note_source());
+        assert!(g.note_first_ear());
+        assert!(!g.note_source());
+        assert!(!g.note_first_ear());
+
+        let mut g = ConnectRouting::default();
+        assert!(!g.note_first_ear());
+        assert!(g.note_source());
+        assert!(!g.note_source());
+    }
 }

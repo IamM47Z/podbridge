@@ -454,10 +454,19 @@ impl MediaController {
 
     pub async fn activate_a2dp_profile(&self) {
         let _routing = self.routing.lock().await;
-        self.activate_a2dp_profile_locked().await;
+        self.activate_a2dp_profile_locked(true).await;
     }
 
-    async fn activate_a2dp_profile_locked(&self) {
+    /// Right after connecting, worn and with no other device using the
+    /// AirPods: route audio here. A card that isn't ready yet is left alone
+    /// rather than restarting WirePlumber; a bud going in or playback still
+    /// activates A2DP later.
+    pub async fn activate_a2dp_profile_on_connect(&self) {
+        let _routing = self.routing.lock().await;
+        self.activate_a2dp_profile_locked(false).await;
+    }
+
+    async fn activate_a2dp_profile_locked(&self, restart_if_missing: bool) {
         debug!("Entering activate_a2dp_profile");
         if crate::audio::hires_mic::headset_fallback_active() {
             info!("Headset profile holds the mic while the AirPods stream is unavailable; not switching to A2DP");
@@ -493,6 +502,9 @@ impl MediaController {
 
         if !ready {
             warn!("A2DP profile still not available after waiting");
+            if !restart_if_missing {
+                return;
+            }
             if !self.restart_wire_plumber_last_resort().await {
                 return;
             }
