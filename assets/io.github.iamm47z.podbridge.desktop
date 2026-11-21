@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=podbridge
+Comment=AirPods on Linux
+Exec=podbridge
+Icon=io.github.iamm47z.podbridge
+Type=Application
+Categories=Utility;

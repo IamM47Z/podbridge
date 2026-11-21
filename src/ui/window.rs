@@ -56,7 +56,7 @@ pub fn start_ui(
     .theme(App::theme)
     .title(App::title)
     .settings(Settings {
-        id: Some("librepods".to_string()),
+        id: Some("io.github.iamm47z.podbridge".to_string()),
         fonts: vec![
             include_bytes!("../../assets/font/sf_pro.otf")
                 .as_slice()
@@ -255,7 +255,7 @@ impl App {
     }
 
     fn title(&self, _id: window::Id) -> String {
-        "LibrePods".to_string()
+        "podbridge".to_string()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {

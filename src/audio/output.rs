@@ -149,7 +149,7 @@ pub fn watch_recorders(wake: std::sync::Arc<tokio::sync::Notify>) {
 // FIFO the pipe-source reads from and that Output writes PCM into.
 fn fifo_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{dir}/librepods-hires.fifo")
+    format!("{dir}/podbridge-hires.fifo")
 }
 
 pub struct VirtualMic {
@@ -200,7 +200,7 @@ impl VirtualMic {
         Some(VirtualMic { module })
     }
 
-    /// Take over a virtual mic left loaded by an earlier LibrePods run instead
+    /// Take over a virtual mic left loaded by an earlier podbridge run instead
     /// of unloading it and creating a new one: some apps (Discord) crash when a
     /// microphone appears or disappears while they record. Only adopted if the
     /// source exists and its FIFO is still there; otherwise every leftover module
@@ -508,7 +508,7 @@ fn pump(mainloop: &mut Mainloop) -> bool {
 
 pub(crate) fn connect() -> Option<(Mainloop, Context)> {
     let mut mainloop = Mainloop::new()?;
-    let mut context = Context::new(&mainloop, "LibrePods")?;
+    let mut context = Context::new(&mainloop, "podbridge")?;
     context
         .connect(None, ContextFlagSet::NOAUTOSPAWN, None)
         .ok()?;

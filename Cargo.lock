@@ -2487,31 +2487,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "librepods"
-version = "0.1.0"
-dependencies = [
- "ab_glyph",
- "aes",
- "bluer",
- "clap",
- "dbus",
- "env_logger",
- "ffmpeg-sys-next",
- "futures",
- "hex",
- "iced",
- "image",
- "imageproc",
- "ksni",
- "libpulse-binding",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "lilt"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3492,6 +3467,31 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
+]
+
+[[package]]
+name = "podbridge"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "aes",
+ "bluer",
+ "clap",
+ "dbus",
+ "env_logger",
+ "ffmpeg-sys-next",
+ "futures",
+ "hex",
+ "iced",
+ "image",
+ "imageproc",
+ "ksni",
+ "libpulse-binding",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

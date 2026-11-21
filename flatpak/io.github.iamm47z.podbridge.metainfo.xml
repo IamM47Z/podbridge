@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+    <id>io.github.iamm47z.podbridge</id>
+
+    <name>podbridge</name>
+    <summary>AirPods on Linux</summary>
+
+    <metadata_license>CC-BY-SA-4.0</metadata_license>
+    <project_license>AGPL-3.0-only</project_license>
+
+    <description>
+        <p>
+            Battery levels, ear detection, noise control, automatic connection when
+            you open the case, and the AirPods' high-quality microphone, on BlueZ and
+            PipeWire. Based on the Linux app of LibrePods.
+        </p>
+    </description>
+
+    <launchable type="desktop-id">io.github.iamm47z.podbridge.desktop</launchable>
+    <url type="homepage">https://github.com/IamM47Z/podbridge</url>
+</component>

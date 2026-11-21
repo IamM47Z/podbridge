@@ -289,7 +289,7 @@ fn start_feed(addr: &str) -> Option<std::process::Child> {
             "--channels=1",
             &format!("--rate={ELD_SAMPLE_RATE}"),
             "--latency-msec=20",
-            "--client-name=librepods-headset-feed",
+            "--client-name=podbridge-headset-feed",
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -651,7 +651,7 @@ async fn monitor_loop(
         if let Some(prev) = old_convo_state.take() {
             restore_conversation_detection(&aacp, prev).await;
         }
-        // The AirPods are still connected (LibrePods is exiting, or the monitor
+        // The AirPods are still connected (podbridge is exiting, or the monitor
         // is being replaced): the STOP needs its A2DP reset like any other, or
         // they keep playing from one earbud. Done here rather than scheduled,
         // since the process may exit before a scheduled one runs.
@@ -673,7 +673,7 @@ async fn monitor_loop(
     blocking(output::restore_wireplumber_mic).await;
 
     if aacp.hires_mic_enabled() {
-        // Disconnected (or LibrePods exiting): keep the virtual mic.
+        // Disconnected (or podbridge exiting): keep the virtual mic.
         release_mic(&tokio::runtime::Handle::current());
     } else {
         blocking(remove_mic).await;
@@ -707,7 +707,7 @@ fn refresh_desktop_default_source(runtime: &tokio::runtime::Handle) {
 // Discord's voice engine aborts (in libpulse, from its mic volume control) on
 // any source appearing or disappearing, even one it doesn't use. So the
 // virtual mic is created once and then kept: across disconnects, with no bud
-// worn, and across LibrePods restarts (a new run adopts the loaded module). It
+// worn, and across podbridge restarts (a new run adopts the loaded module). It
 // is only unloaded when the hi-res mic is turned off.
 //
 // While the AirPods can't deliver mic audio the mic is "parked": another mic
@@ -792,7 +792,7 @@ static SHARED_MIC: Mutex<Option<SharedMic>> = Mutex::new(None);
 fn parked_path() -> String {
     let dir = std::env::var("XDG_STATE_HOME")
         .unwrap_or_else(|_| format!("{}/.local/state", std::env::var("HOME").unwrap_or_default()));
-    format!("{dir}/librepods/hires-mic.parked")
+    format!("{dir}/{}/hires-mic.parked", crate::utils::APP_DIR)
 }
 
 /// Parked state saved by an earlier run or before the sound server restarted,
@@ -925,7 +925,7 @@ fn mic_is_parked() -> bool {
     shared_mic().as_ref().is_some_and(|m| m.parked.is_some())
 }
 
-/// Park the mic now (no bud worn, or LibrePods exiting). Blocking.
+/// Park the mic now (no bud worn, or podbridge exiting). Blocking.
 fn park_mic() {
     let mut guard = shared_mic();
     if let Some(mic) = guard.as_mut()
@@ -1017,7 +1017,7 @@ fn recreate_mic(description: &str) -> bool {
     true
 }
 
-/// LibrePods is exiting: keep the virtual mic loaded (the next run adopts it)
+/// podbridge is exiting: keep the virtual mic loaded (the next run adopts it)
 /// but send apps to another mic, since nothing will feed this one.
 pub fn park_on_exit() {
     park_mic();

@@ -53,7 +53,7 @@ fn main() -> iced::Result {
 
     if args.version {
         println!(
-            "You are running LibrePods version {}",
+            "You are running podbridge version {}",
             env!("CARGO_PKG_VERSION")
         );
         return Ok(());
@@ -70,7 +70,7 @@ fn main() -> iced::Result {
                 "RUST_LOG",
                 log_level.to_owned()
                     + &format!(
-                        ",zbus=warn,winit=warn,tracing=warn,iced_wgpu=warn,wgpu_hal=warn,wgpu_core=warn,cosmic_text=warn,naga=warn,iced_winit=warn,librepods::bluetooth::le={}",
+                        ",zbus=warn,winit=warn,tracing=warn,iced_wgpu=warn,wgpu_hal=warn,wgpu_core=warn,cosmic_text=warn,naga=warn,iced_winit=warn,podbridge::bluetooth::le={}",
                         if args.le_debug { "debug" } else { "info" }
                     ),
             )
@@ -83,6 +83,7 @@ fn main() -> iced::Result {
     let Ok(_instance_lock) = acquire_instance_lock(args.start_minimized) else {
         return Ok(());
     };
+    utils::migrate_from_librepods();
 
     let (ui_tx, ui_rx) = unbounded_channel::<BluetoothUIMessage>();
 
@@ -164,7 +165,7 @@ async fn async_main(
             ui_tx: Some(ui_tx.clone()),
             shutdown_tx: Some(shutdown_tx.clone()),
         };
-        // LibrePods can be started by the session manager before the desktop's
+        // podbridge can be started by the session manager before the desktop's
         // StatusNotifierWatcher is ready. Keep the tray service alive in that
         // case so it can register when the watcher appears instead of aborting
         // the entire process during login.
@@ -384,8 +385,8 @@ async fn async_main(
             )) {
                 warn!("Failed to send DeviceConnected UI message: {:?}", e);
             }
-            // LIBREPODS_HIRES_MIC=1: enable the hi-res mic feature headlessly.
-            if env::var("LIBREPODS_HIRES_MIC").is_ok() {
+            // PODBRIDGE_HIRES_MIC=1: enable the hi-res mic feature headlessly.
+            if env::var("PODBRIDGE_HIRES_MIC").is_ok() {
                 tokio::spawn(async move {
                     hires_aacp.set_hires_mic_enabled(true).await;
                 });
@@ -515,7 +516,7 @@ async fn wait_for_adapter(session: &bluer::Session) -> bluer::Result<bluer::Adap
     }
 }
 
-/// Takes `$XDG_RUNTIME_DIR/librepods.lock` for the life of the process. `Ok(None)` means the
+/// Takes `$XDG_RUNTIME_DIR/podbridge.lock` for the life of the process. `Ok(None)` means the
 /// lock file could not be opened, so we run without the check. `Err(())` means another
 /// instance holds it: unless we were started minimized (autostart), it is sent SIGUSR1 to
 /// open its window, and the caller should exit.
@@ -523,7 +524,7 @@ fn acquire_instance_lock(start_minimized: bool) -> Result<Option<std::fs::File>,
     use std::io::{Read, Write};
 
     let dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    let path = std::path::Path::new(&dir).join("librepods.lock");
+    let path = std::path::Path::new(&dir).join("podbridge.lock");
     let mut file = match std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -553,10 +554,10 @@ fn acquire_instance_lock(start_minimized: bool) -> Result<Option<std::fs::File>,
             let _ = file.read_to_string(&mut pid);
             let pid = pid.trim();
             if start_minimized {
-                info!("LibrePods is already running (pid {}); exiting", pid);
+                info!("podbridge is already running (pid {}); exiting", pid);
             } else if !pid.is_empty() {
                 info!(
-                    "LibrePods is already running (pid {}); asking it to open its window",
+                    "podbridge is already running (pid {}); asking it to open its window",
                     pid
                 );
                 let _ = std::process::Command::new("kill")

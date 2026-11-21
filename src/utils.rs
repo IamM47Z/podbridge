@@ -3,14 +3,71 @@ use aes::cipher::Array;
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use iced::Theme;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// The folder name under the XDG data, config and state folders.
+pub const APP_DIR: &str = "podbridge";
+/// The folder name an earlier LibrePods install used.
+const OLD_APP_DIR: &str = "librepods";
+
+/// Copies what an earlier LibrePods install left in the XDG data, config and state
+/// folders into the podbridge folders, once. It copies rather than moves, so going
+/// back to LibrePods still works. Must run before anything creates a podbridge folder.
+pub fn migrate_from_librepods() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let base = |var: &str, default: &str| {
+        PathBuf::from(std::env::var(var).unwrap_or_else(|_| format!("{home}/{default}")))
+    };
+    for dir in [
+        base("XDG_DATA_HOME", ".local/share"),
+        base("XDG_CONFIG_HOME", ".config"),
+        base("XDG_STATE_HOME", ".local/state"),
+    ] {
+        let (old, new) = (dir.join(OLD_APP_DIR), dir.join(APP_DIR));
+        match copy_old_app_dir(&old, &new) {
+            Ok(true) => log::info!("Copied {} to {}", old.display(), new.display()),
+            Ok(false) => {}
+            Err(e) => log::warn!(
+                "Could not copy {} to {}: {}",
+                old.display(),
+                new.display(),
+                e
+            ),
+        }
+    }
+}
+
+/// Copies `old` to `new` when `old` exists and `new` does not. A temp folder renamed
+/// at the end keeps an interrupted copy from passing for a finished one.
+fn copy_old_app_dir(old: &Path, new: &Path) -> std::io::Result<bool> {
+    if !old.is_dir() || new.exists() {
+        return Ok(false);
+    }
+    let tmp = new.with_extension("migrating");
+    let _ = std::fs::remove_dir_all(&tmp);
+    copy_dir(old, &tmp)?;
+    std::fs::rename(&tmp, new)?;
+    Ok(true)
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
 
 pub fn get_devices_path() -> PathBuf {
     let data_dir = std::env::var("XDG_DATA_HOME")
         .unwrap_or_else(|_| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()));
-    PathBuf::from(data_dir)
-        .join("librepods")
-        .join("devices.json")
+    PathBuf::from(data_dir).join(APP_DIR).join("devices.json")
 }
 
 /// Write a file atomically: write a temp file next to it, then rename over it.
@@ -69,7 +126,7 @@ pub fn get_preferences_path() -> PathBuf {
     let config_dir = std::env::var("XDG_CONFIG_HOME")
         .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_default()));
     PathBuf::from(config_dir)
-        .join("librepods")
+        .join(APP_DIR)
         .join("preferences.json")
 }
 
@@ -83,7 +140,7 @@ pub fn get_app_settings_path() -> PathBuf {
         std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| format!("{}/.local/share", home));
 
     let new_path = PathBuf::from(&config_dir)
-        .join("librepods")
+        .join(APP_DIR)
         .join("app_settings.json");
 
     let old_path = PathBuf::from(&data_dir).join("app_settings.json");
@@ -304,5 +361,54 @@ impl From<MyTheme> for Theme {
             MyTheme::Oxocarbon => Theme::Oxocarbon,
             MyTheme::Ferra => Theme::Ferra,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::copy_old_app_dir;
+    use std::fs;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("podbridge-test-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn old_folder_is_copied_once_and_kept() {
+        let base = scratch("copy");
+        let (old, new) = (base.join("librepods"), base.join("podbridge"));
+        fs::create_dir_all(old.join("sub")).unwrap();
+        fs::write(old.join("devices.json"), "{\"a\":1}").unwrap();
+        fs::write(old.join("sub/x"), "x").unwrap();
+
+        assert!(copy_old_app_dir(&old, &new).unwrap());
+        assert_eq!(
+            fs::read_to_string(new.join("devices.json")).unwrap(),
+            "{\"a\":1}"
+        );
+        assert_eq!(fs::read_to_string(new.join("sub/x")).unwrap(), "x");
+        assert!(old.join("devices.json").exists());
+
+        // A later run never overwrites podbridge data with the old copy.
+        fs::write(old.join("devices.json"), "{}").unwrap();
+        assert!(!copy_old_app_dir(&old, &new).unwrap());
+        assert_eq!(
+            fs::read_to_string(new.join("devices.json")).unwrap(),
+            "{\"a\":1}"
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn nothing_happens_without_an_old_folder() {
+        let base = scratch("none");
+        let new = base.join("podbridge");
+        assert!(!copy_old_app_dir(&base.join("librepods"), &new).unwrap());
+        assert!(!new.exists());
+        fs::remove_dir_all(base).unwrap();
     }
 }
