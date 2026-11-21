@@ -1,0 +1,35 @@
+# podbridge
+
+AirPods on Linux, done properly: battery levels, ear detection, noise control,
+automatic connection when you open the case, and the AirPods' high-quality
+microphone, on BlueZ and PipeWire.
+
+Status: early. It runs daily on Arch Linux with Hyprland, PipeWire 1.6 and
+BlueZ 5.88 with AirPods Pro.
+
+## Install
+
+Arch Linux: build `packaging/podbridge-git/PKGBUILD` with `makepkg -si`.
+
+Other distributions: download the binary or the AppImage from the
+[releases](https://github.com/IamM47Z/podbridge/releases).
+
+## Build
+
+Needs Rust, `pkg-config`, D-Bus, PulseAudio client and FFmpeg development
+files, and `clang`.
+
+```sh
+cargo build --release
+```
+
+## Credits
+
+podbridge started as the Linux app of
+[LibrePods](https://github.com/librepods-org/librepods) by Kavish Devar and
+its contributors, who worked out the AirPods protocol this app speaks. Thank
+you. See [NOTICE](NOTICE) for what was taken and from where.
+
+## License
+
+GNU Affero General Public License v3.0, see [LICENSE](LICENSE).

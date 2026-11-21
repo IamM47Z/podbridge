@@ -1,0 +1,15 @@
+podbridge
+Copyright (C) 2026 IamM47Z
+
+This program is based on the Linux app (linux-rust/) of LibrePods,
+https://github.com/librepods-org/librepods
+Copyright (C) Kavish Devar and the LibrePods contributors,
+licensed under the GNU Affero General Public License v3.0.
+
+The import includes merged upstream pull requests by, among others,
+Tristan Collins, Cem Ali, tboris, Luan Ademi, Ramfi Aogusto, injkgz,
+Sriharsha Chintalapani, Michał Matczuk, Ousama Ben Younes and Lasse Götte.
+Their authorship is recorded in the LibrePods history.
+
+podbridge is distributed under the same license, the GNU Affero General
+Public License v3.0. See LICENSE.
