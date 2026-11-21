@@ -1,0 +1,5 @@
+# Placeholder until the LibrePods code is imported, so CI and the release run end to end.
+[package]
+name = "podbridge"
+version = "0.0.0"
+edition = "2024"

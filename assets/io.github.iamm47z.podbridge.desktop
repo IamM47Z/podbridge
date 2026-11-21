@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=podbridge
+Exec=podbridge
+Icon=io.github.iamm47z.podbridge
+Type=Application
+Categories=Utility;
