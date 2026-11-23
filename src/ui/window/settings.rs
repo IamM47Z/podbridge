@@ -1,8 +1,11 @@
 use super::{App, Message};
 use crate::ui::style;
 use crate::ui::widgets::toggle_row;
+use crate::utils::StemAction;
 use iced::Task;
-use iced::widget::{Column, Container, Space, column, combo_box, container, row, text, toggler};
+use iced::widget::{
+    Column, Container, Space, column, combo_box, container, pick_list, row, text, toggler,
+};
 use iced::{Center, Length, Padding};
 
 impl App {
@@ -24,7 +27,7 @@ impl App {
                 Message::TrayTextModeChanged,
             ),
             Space::new().height(Length::from(20)),
-            controls_section(self.stem_control),
+            self.controls_section(),
             Space::new().height(Length::from(20)),
             setting_toggle(
                 "Switch audio away when both buds are out",
@@ -93,17 +96,52 @@ impl App {
     }
 }
 
-fn controls_section<'a>(stem_control: bool) -> Column<'a, Message> {
-    column![
-        heading("Controls"),
-        setting_toggle(
-            "Stem press track control",
-            "Double press = next track, triple press = previous track. Disable if your environment handles AirPods AVRCP commands natively.",
-            stem_control,
-            Message::StemControlChanged,
-        )
-    ]
-    .spacing(12)
+impl App {
+    fn controls_section(&self) -> Column<'_, Message> {
+        let mut section = column![
+            heading("Controls"),
+            setting_toggle(
+                "Stem press control",
+                "podbridge handles double and triple presses with the actions below. Takes effect on the next connect. Disable if your environment handles AirPods AVRCP commands natively.",
+                self.stem_control,
+                Message::StemControlChanged,
+            )
+        ]
+        .spacing(12);
+        if self.stem_control {
+            section = section
+                .push(stem_action_row(
+                    "Double press",
+                    self.stem_double_press,
+                    Message::StemDoublePressChanged,
+                ))
+                .push(stem_action_row(
+                    "Triple press",
+                    self.stem_triple_press,
+                    Message::StemTriplePressChanged,
+                ));
+        }
+        section
+    }
+}
+
+fn stem_action_row<'a>(
+    label: &'a str,
+    selected: StemAction,
+    on_select: fn(StemAction) -> Message,
+) -> Container<'a, Message> {
+    container(
+        row![
+            text(label).size(16),
+            Space::new().width(Length::Fill),
+            pick_list(StemAction::ALL, Some(selected), on_select)
+                .padding(Padding::from([5.0, 10.0]))
+                .width(Length::from(200))
+        ]
+        .align_y(Center),
+    )
+    .padding(Padding::from([5.0, 18.0]))
+    .style(style::card)
 }
 
 fn heading(title: &str) -> Container<'_, Message> {

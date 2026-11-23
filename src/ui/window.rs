@@ -1,7 +1,7 @@
 use crate::bluetooth::managers::DeviceManagers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
 use crate::ui::messages::BluetoothUIMessage;
-use crate::utils::{AppSettings, MyTheme};
+use crate::utils::{AppSettings, MyTheme, StemAction};
 use bluer::Address;
 use iced::widget::{combo_box, container, pane_grid};
 use iced::{Element, Font, Length, Settings, Size, Subscription, Task, Theme, daemon, window};
@@ -77,6 +77,8 @@ pub struct App {
     selected_device_type: Option<DeviceType>,
     tray_text_mode: bool,
     stem_control: bool,
+    stem_double_press: StemAction,
+    stem_triple_press: StemAction,
     hires_mic_enabled: bool,
     hires_mic_agc: bool,
     hires_mic_pause_convo: bool,
@@ -121,6 +123,8 @@ pub enum Message {
     AdaptiveStrengthSettled(String, u64),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
     StemControlChanged(bool),
+    StemDoublePressChanged(StemAction),
+    StemTriplePressChanged(StemAction),
     A2dpResetChanged(bool),
     AudioOffWhenNotWearingChanged(bool),
     PauseWhenOneRemovedChanged(bool),
@@ -226,6 +230,8 @@ impl App {
                 device_managers,
                 tray_text_mode,
                 stem_control,
+                stem_double_press: app_settings.stem_double_press,
+                stem_triple_press: app_settings.stem_triple_press,
                 hires_mic_enabled,
                 hires_mic_agc,
                 hires_mic_pause_convo,
@@ -243,6 +249,8 @@ impl App {
             s.theme = self.selected_theme;
             s.tray_text_mode = self.tray_text_mode;
             s.stem_control = self.stem_control;
+            s.stem_double_press = self.stem_double_press;
+            s.stem_triple_press = self.stem_triple_press;
             s.hires_mic_enabled = self.hires_mic_enabled;
             s.hires_mic_agc = self.hires_mic_agc;
             s.hires_mic_pause_convo = self.hires_mic_pause_convo;
@@ -306,6 +314,12 @@ impl App {
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),
             Message::TrayTextModeChanged(on) => self.change_setting(|app| app.tray_text_mode = on),
             Message::StemControlChanged(on) => self.change_setting(|app| app.stem_control = on),
+            Message::StemDoublePressChanged(action) => {
+                self.change_setting(|app| app.stem_double_press = action)
+            }
+            Message::StemTriplePressChanged(action) => {
+                self.change_setting(|app| app.stem_triple_press = action)
+            }
             Message::A2dpResetChanged(on) => self.change_setting(|app| app.a2dp_reset = on),
             Message::AudioOffWhenNotWearingChanged(on) => {
                 self.change_setting(|app| app.audio_off_when_not_wearing = on)

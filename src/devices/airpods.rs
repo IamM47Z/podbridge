@@ -4,7 +4,7 @@ use crate::devices::low_battery::{LowBatteryAlerts, alert_body, notify};
 use crate::media_controller::MediaController;
 use crate::ui::messages::BluetoothUIMessage;
 use crate::ui::tray::MyTray;
-use crate::utils::get_app_settings_path;
+use crate::utils::{StemAction, get_app_settings_path};
 use bluer::Address;
 use ksni::Handle;
 use log::{debug, error, info};
@@ -479,25 +479,36 @@ impl EventLoop {
     }
 
     async fn handle_stem_press(&self, press_type: &crate::bluetooth::aacp::StemPressType) {
-        use crate::bluetooth::aacp::StemPressType;
         if !self.stem_control {
             debug!("Stem control disabled, ignoring stem press event");
             return;
         }
+        // Read on each press, so a change in Settings applies at once.
+        let Some(action) = stem_action(press_type, &crate::utils::AppSettings::load()) else {
+            debug!("Unhandled stem press type: {:?}", press_type);
+            return;
+        };
+        info!("{:?} press: {}", press_type, action);
         let controller = self.media_controller.lock().await;
-        match press_type {
-            StemPressType::Double => {
-                info!("Double press detected, skipping to next track");
-                controller.next_track().await;
-            }
-            StemPressType::Triple => {
-                info!("Triple press detected, going to previous track");
-                controller.previous_track().await;
-            }
-            _ => {
-                debug!("Unhandled stem press type: {:?}", press_type);
-            }
+        match action {
+            StemAction::PlayPause => controller.play_pause().await,
+            StemAction::NextTrack => controller.next_track().await,
+            StemAction::PreviousTrack => controller.previous_track().await,
         }
+    }
+}
+
+/// The action the settings give a stem press. Single and long presses stay
+/// with the AirPods: podbridge only asks for double and triple presses.
+fn stem_action(
+    press: &crate::bluetooth::aacp::StemPressType,
+    settings: &crate::utils::AppSettings,
+) -> Option<StemAction> {
+    use crate::bluetooth::aacp::StemPressType;
+    match press {
+        StemPressType::Double => Some(settings.stem_double_press),
+        StemPressType::Triple => Some(settings.stem_triple_press),
+        StemPressType::Single | StemPressType::Long => None,
     }
 }
 
@@ -566,7 +577,46 @@ pub struct AirPodsInformation {
 
 #[cfg(test)]
 mod tests {
-    use super::ConnectRouting;
+    use super::{ConnectRouting, stem_action};
+    use crate::bluetooth::aacp::StemPressType;
+    use crate::utils::{AppSettings, StemAction};
+
+    #[test]
+    fn stem_presses_default_to_next_and_previous_track() {
+        let s = AppSettings::default();
+        assert_eq!(
+            stem_action(&StemPressType::Double, &s),
+            Some(StemAction::NextTrack)
+        );
+        assert_eq!(
+            stem_action(&StemPressType::Triple, &s),
+            Some(StemAction::PreviousTrack)
+        );
+    }
+
+    #[test]
+    fn stem_presses_follow_the_settings() {
+        let s = AppSettings {
+            stem_double_press: StemAction::PlayPause,
+            stem_triple_press: StemAction::NextTrack,
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            stem_action(&StemPressType::Double, &s),
+            Some(StemAction::PlayPause)
+        );
+        assert_eq!(
+            stem_action(&StemPressType::Triple, &s),
+            Some(StemAction::NextTrack)
+        );
+    }
+
+    #[test]
+    fn single_and_long_presses_are_left_to_the_airpods() {
+        let s = AppSettings::default();
+        assert_eq!(stem_action(&StemPressType::Single, &s), None);
+        assert_eq!(stem_action(&StemPressType::Long, &s), None);
+    }
 
     #[test]
     fn connect_routing_fires_once_after_both_first_reports() {

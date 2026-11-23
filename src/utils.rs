@@ -159,6 +159,28 @@ pub fn ah(k: &[u8; 16], r: &[u8; 3]) -> [u8; 3] {
     hash
 }
 
+/// What a stem double or triple press does when podbridge handles presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StemAction {
+    PlayPause,
+    NextTrack,
+    PreviousTrack,
+}
+
+impl StemAction {
+    pub const ALL: [StemAction; 3] = [Self::PlayPause, Self::NextTrack, Self::PreviousTrack];
+}
+
+impl std::fmt::Display for StemAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::PlayPause => "Play/Pause",
+            Self::NextTrack => "Next track",
+            Self::PreviousTrack => "Previous track",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum MyTheme {
     Light,
@@ -220,6 +242,8 @@ pub struct AppSettings {
     pub theme: MyTheme,
     pub tray_text_mode: bool,
     pub stem_control: bool,
+    pub stem_double_press: StemAction,
+    pub stem_triple_press: StemAction,
     pub hires_mic_enabled: bool,
     pub hires_mic_agc: bool,
     pub hires_mic_pause_convo: bool,
@@ -245,6 +269,8 @@ impl Default for AppSettings {
             theme: MyTheme::Dark,
             tray_text_mode: false,
             stem_control: false,
+            stem_double_press: StemAction::NextTrack,
+            stem_triple_press: StemAction::PreviousTrack,
             hires_mic_enabled: true,
             hires_mic_agc: true,
             hires_mic_pause_convo: true,
