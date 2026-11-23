@@ -1,11 +1,12 @@
 use crate::bluetooth::aacp::{AACPManager, ControlCommandIdentifiers};
+use crate::devices::press_and_hold;
 use crate::ui::style;
 use crate::ui::widgets::{copyable, info_row, toggle_row};
 use iced::Alignment::End;
 use iced::border::Radius;
 use iced::widget::rule::FillMode;
 use iced::widget::{
-    Column, Container, Row, Space, column, combo_box, container, row, rule, slider, text,
+    Column, Container, Row, Space, checkbox, column, combo_box, container, row, rule, slider, text,
     text_input, toggler,
 };
 use iced::{Background, Border, Center, Color, Length, Padding, Theme};
@@ -151,10 +152,41 @@ fn listening_mode_section<'a>(
             ]
             .align_y(Center)
         ]
-        .extend(adaptive_strength_row(mac, state)),
+        .extend(adaptive_strength_row(mac, state))
+        .extend(press_and_hold_row(mac, state)),
     )
     .padding(Padding::from([5.0, 18.0]))
     .style(style::card)
+}
+
+/// Which listening modes a stem press and hold cycles through. Off is listed
+/// only while the AirPods allow it. Shown once the AirPods report the setting.
+fn press_and_hold_row<'a>(
+    mac: &str,
+    state: &'a AirPodsState,
+) -> Option<iced::Element<'a, Message>> {
+    let mask = state.press_and_hold_modes?;
+    let boxes = press_and_hold::MODES
+        .iter()
+        .filter(|(mode, _)| *mode != press_and_hold::OFF || state.allow_off_mode)
+        .map(|&(mode, name)| {
+            let mac = mac.to_string();
+            checkbox(mask & mode != 0)
+                .label(name)
+                .on_toggle(move |_| Message::PressAndHoldToggled(mac.clone(), mode))
+                .into()
+        });
+    Some(
+        column![
+            text("Press and hold cycles through")
+                .size(14)
+                .style(style::text_muted),
+            row(boxes).spacing(16)
+        ]
+        .spacing(6)
+        .padding(Padding::from([8.0, 0.0]))
+        .into(),
+    )
 }
 
 /// Adaptive mode's strength slider, like Apple's "Customize Adaptive Audio".

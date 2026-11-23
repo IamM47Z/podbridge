@@ -121,6 +121,8 @@ pub enum Message {
     AdaptiveStrengthChanged(String, u8),
     /// The debounce after a slider move ran out (mac, generation).
     AdaptiveStrengthSettled(String, u64),
+    /// A press-and-hold listening mode checkbox was clicked (mac, mode bit).
+    PressAndHoldToggled(String, u8),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
     StemControlChanged(bool),
     StemDoublePressChanged(StemAction),
@@ -311,6 +313,7 @@ impl App {
             Message::AdaptiveStrengthSettled(mac, generation) => {
                 self.adaptive_strength_settled(&mac, generation)
             }
+            Message::PressAndHoldToggled(mac, mode) => self.press_and_hold_toggled(mac, mode),
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),
             Message::TrayTextModeChanged(on) => self.change_setting(|app| app.tray_text_mode = on),
             Message::StemControlChanged(on) => self.change_setting(|app| app.stem_control = on),

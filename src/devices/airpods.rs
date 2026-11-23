@@ -54,6 +54,7 @@ impl AirPodsDevice {
         if stem_control {
             enable_stem_press_detection(&aacp_manager).await;
         }
+        restore_press_and_hold_modes(&aacp_manager, &mac_address.to_string()).await;
 
         let media_controller = Arc::new(Mutex::new(MediaController::new(
             mac_address.to_string(),
@@ -179,6 +180,24 @@ async fn enable_stem_press_detection(aacp_manager: &AACPManager) {
         .await
     {
         error!("Failed to enable stem press detection: {}", e);
+    }
+}
+
+/// The AirPods forget the press-and-hold modes when they join an Apple device
+/// that is not iCloud-synced; send the ones chosen here again.
+async fn restore_press_and_hold_modes(aacp_manager: &AACPManager, mac: &str) {
+    let Some(&mask) = crate::utils::AppSettings::load()
+        .press_and_hold_modes
+        .get(mac)
+    else {
+        return;
+    };
+    info!("Restoring press-and-hold modes {:#04x}", mask);
+    if let Err(e) = aacp_manager
+        .send_control_command(ControlCommandIdentifiers::ListeningModeConfigs, &[mask])
+        .await
+    {
+        error!("Failed to restore press-and-hold modes: {}", e);
     }
 }
 

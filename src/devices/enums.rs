@@ -60,6 +60,9 @@ pub struct AirPodsState {
     /// Adaptive mode's noise filtering, 0 to 100 (100 filters the most), as
     /// the AirPods report it; None on models without it.
     pub adaptive_strength: Option<u8>,
+    /// The press-and-hold listening modes bitmask (control command 0x1A), as
+    /// the AirPods report it; None until they do.
+    pub press_and_hold_modes: Option<u8>,
     /// Local capture state of the proprietary hi-res microphone (UI-driven).
     pub hires_mic_enabled: bool,
     pub battery: Vec<BatteryInfo>,

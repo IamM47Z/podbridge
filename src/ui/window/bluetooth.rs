@@ -171,6 +171,10 @@ impl App {
                 .iter()
                 .find(|status| status.identifier == ControlCommandIdentifiers::AutoAncStrength)
                 .and_then(|status| status.value.first().copied()),
+            press_and_hold_modes: statuses
+                .iter()
+                .find(|status| status.identifier == ControlCommandIdentifiers::ListeningModeConfigs)
+                .and_then(|status| status.value.first().copied()),
             hires_mic_enabled: self.hires_mic_enabled,
         }
     }
@@ -224,6 +228,11 @@ impl App {
                 ControlCommandIdentifiers::AutoAncStrength => {
                     if let Some(state) = self.airpods_state_mut(mac) {
                         state.adaptive_strength = status.value.first().copied();
+                    }
+                }
+                ControlCommandIdentifiers::ListeningModeConfigs => {
+                    if let Some(state) = self.airpods_state_mut(mac) {
+                        state.press_and_hold_modes = status.value.first().copied();
                     }
                 }
                 ControlCommandIdentifiers::AllowOffOption => {

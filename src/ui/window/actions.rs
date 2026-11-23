@@ -4,6 +4,7 @@ use super::bluetooth::{device_type_from_file, noise_control_modes};
 use super::{App, Message, Tab};
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
+use crate::devices::press_and_hold;
 use crate::ui::messages::BluetoothUIMessage;
 use bluer::Address;
 use iced::Task;
@@ -79,6 +80,40 @@ impl App {
         let Some(level) = state.adaptive_strength else {
             return Task::none();
         };
+        self.send_control_command(mac, ControlCommandIdentifiers::AutoAncStrength, level)
+    }
+
+    /// Flip one press-and-hold mode, unless that would leave fewer than two.
+    /// The choice is stored so the next connect sends it again: the AirPods
+    /// reset it when they join an Apple device that is not iCloud-synced.
+    pub(super) fn press_and_hold_toggled(&mut self, mac: String, mode: u8) -> Task<Message> {
+        let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) else {
+            return Task::none();
+        };
+        let Some(mask) = state.press_and_hold_modes else {
+            return Task::none();
+        };
+        let new_mask = press_and_hold::toggle(mask, mode);
+        if new_mask == mask {
+            return Task::none();
+        }
+        state.press_and_hold_modes = Some(new_mask);
+        crate::utils::AppSettings::update(|s| {
+            s.press_and_hold_modes.insert(mac.clone(), new_mask);
+        });
+        self.send_control_command(
+            &mac,
+            ControlCommandIdentifiers::ListeningModeConfigs,
+            new_mask,
+        )
+    }
+
+    fn send_control_command(
+        &self,
+        mac: &str,
+        identifier: ControlCommandIdentifiers,
+        value: u8,
+    ) -> Task<Message> {
         let Some(aacp) = self
             .device_managers
             .blocking_read()
@@ -89,11 +124,8 @@ impl App {
         };
         Task::perform(
             async move {
-                if let Err(e) = aacp
-                    .send_control_command(ControlCommandIdentifiers::AutoAncStrength, &[level])
-                    .await
-                {
-                    error!("Failed to send adaptive strength: {}", e);
+                if let Err(e) = aacp.send_control_command(identifier, &[value]).await {
+                    error!("Failed to send {:?}: {}", identifier, e);
                 }
             },
             |_| Message::Bluetooth(BluetoothUIMessage::NoOp),
