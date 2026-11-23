@@ -14,15 +14,6 @@ Arch Linux: build `packaging/podbridge-git/PKGBUILD` with `makepkg -si`.
 Other distributions: download the binary or the AppImage from the
 [releases](https://github.com/IamM47Z/podbridge/releases).
 
-## Moving from LibrePods
-
-The package replaces `librepods-rust-git`. On first start, podbridge copies
-the `librepods` folders under `~/.local/share`, `~/.config` and
-`~/.local/state` to `podbridge` folders, so paired devices and settings carry
-over and the old folders stay untouched. An autostart entry that runs
-`librepods` must be changed to run `podbridge --start-minimized`. The
-`LIBREPODS_HIRES_MIC` variable is now `PODBRIDGE_HIRES_MIC`.
-
 ## Build
 
 Needs Rust, `pkg-config`, D-Bus, PulseAudio client and FFmpeg development

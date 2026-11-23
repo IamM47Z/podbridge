@@ -82,7 +82,6 @@ fn main() -> iced::Result {
     let Ok(_instance_lock) = acquire_instance_lock(args.start_minimized) else {
         return Ok(());
     };
-    utils::migrate_from_librepods();
 
     let (ui_tx, ui_rx) = unbounded_channel::<BluetoothUIMessage>();
 

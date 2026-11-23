@@ -5,13 +5,11 @@ pkgrel=1
 pkgdesc="AirPods on Linux: battery, ear detection, noise control, auto-connect and the high-quality mic"
 arch=('x86_64')
 url="https://github.com/IamM47Z/podbridge"
-# The license LibrePods declares in its metainfo.
 license=('AGPL-3.0-only')
 depends=('bluez' 'libpulse' 'dbus' 'ffmpeg' 'gcc-libs' 'glibc' 'hicolor-icon-theme')
 makedepends=('git' 'rust' 'cargo' 'clang')
 provides=('podbridge')
-conflicts=('podbridge' 'librepods' 'librepods-git' 'librepods-rust-git')
-replaces=('librepods-rust-git')
+conflicts=('podbridge')
 source=("git+https://github.com/IamM47Z/podbridge.git")
 sha256sums=('SKIP')
 
