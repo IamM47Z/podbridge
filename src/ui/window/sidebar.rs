@@ -16,28 +16,17 @@ impl App {
         let content = column![
             row![
                 text("Devices").size(18),
-                // Removing until I actually add support for devices other than AirPods
-                // Space::new().width(Length::Fill),
-                // button(
-                //     container(text("+").size(18)).center_x(Length::Fill).center_y(Length::Fill)
-                // )
-                //     .style(
-                //         |theme: &Theme, _status| {
-                //             let mut style = Style::default();
-                //             style.text_color = theme.palette().text;
-                //             style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                //             style.border = Border {
-                //                 width: 1.0,
-                //                 color: theme.palette().primary.scale_alpha(0.1),
-                //                 radius: Radius::from(8.0),
-                //             };
-                //             style
-                //         }
-                //     )
-                //     .padding(0)
-                //     .width(Length::from(28))
-                //     .height(Length::from(28))
-                //     .on_press(Message::ShowNewDialogTab)
+                Space::new().width(Length::Fill),
+                button(
+                    container(text("+").size(18))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                )
+                .style(|theme: &Theme, _status| style::sidebar_tab(theme, false))
+                .padding(0)
+                .width(Length::from(28))
+                .height(Length::from(28))
+                .on_press(Message::ShowNewDialogTab)
             ]
             .align_y(Center)
             .padding(4),

@@ -106,10 +106,7 @@ pub enum Message {
     ThemeSelected(MyTheme),
     CopyToClipboard(String),
     Bluetooth(BluetoothUIMessage),
-    // ShowNewDialogTab,
-    // shortcut: upstream disabled the add-device tab (4a9a2e7, no reason given); it is
-    // the only UI path to add a Nothing device. Re-enable or replace it, then drop these.
-    #[expect(dead_code, reason = "add-device tab disabled upstream")]
+    ShowNewDialogTab,
     GotPairedDevices(HashMap<String, Address>),
     StartAddDevice(String, Address),
     SelectDeviceType(DeviceType),
@@ -130,7 +127,6 @@ pub enum Message {
 pub enum Tab {
     Device(String),
     Settings,
-    #[expect(dead_code, reason = "add-device tab disabled upstream")]
     AddDevice,
 }
 
@@ -281,11 +277,10 @@ impl App {
             Message::CopyToClipboard(data) => iced::clipboard::write(data),
             Message::MicLevelTick => Task::none(),
             Message::Bluetooth(ui_message) => self.handle_bluetooth(ui_message),
-            // Message::ShowNewDialogTab => {
-            //     debug!("switching to Add Device tab");
-            //     self.selected_tab = Tab::AddDevice;
-            //     Task::perform(load_paired_devices(), Message::GotPairedDevices)
-            // }
+            Message::ShowNewDialogTab => {
+                self.selected_tab = Tab::AddDevice;
+                Task::perform(load_paired_devices(), Message::GotPairedDevices)
+            }
             Message::GotPairedDevices(map) => self.got_paired_devices(map),
             Message::StartAddDevice(name, addr) => self.start_add_device(name, addr),
             Message::SelectDeviceType(device_type) => {
@@ -386,28 +381,49 @@ async fn wait_for_message(ui_rx: Arc<Mutex<UnboundedReceiver<BluetoothUIMessage>
     }
 }
 
-// async fn load_paired_devices() -> HashMap<String, Address> {
-//     let mut devices = HashMap::new();
-//
-//     let session = Session::new().await.ok().unwrap();
-//     let adapter = session.default_adapter().await.ok().unwrap();
-//     let addresses = adapter.device_addresses().await.ok().unwrap();
-//     for addr in addresses {
-//         let device = adapter.device(addr).ok().unwrap();
-//         let paired = device.is_paired().await.ok().unwrap();
-//         if paired {
-//             let name = device
-//                 .name()
-//                 .await
-//                 .ok()
-//                 .flatten()
-//                 .unwrap_or_else(|| "Unknown".to_string());
-//             devices.insert(name, addr);
-//         }
-//     }
-//
-//     devices
-// }
+/// Paired Bluetooth devices by name. A D-Bus failure is logged and gives an
+/// empty or partial list.
+async fn load_paired_devices() -> HashMap<String, Address> {
+    let mut devices = HashMap::new();
+    let adapter = match bluer::Session::new().await {
+        Ok(session) => session.default_adapter().await,
+        Err(e) => Err(e),
+    };
+    let adapter = match adapter {
+        Ok(adapter) => adapter,
+        Err(e) => {
+            error!("Failed to open the Bluetooth adapter: {}", e);
+            return devices;
+        }
+    };
+    let addresses = match adapter.device_addresses().await {
+        Ok(addresses) => addresses,
+        Err(e) => {
+            error!("Failed to list Bluetooth devices: {}", e);
+            return devices;
+        }
+    };
+    for addr in addresses {
+        let device = match adapter.device(addr) {
+            Ok(device) => device,
+            Err(e) => {
+                error!("Failed to open Bluetooth device {}: {}", addr, e);
+                continue;
+            }
+        };
+        if !device.is_paired().await.unwrap_or(false) {
+            continue;
+        }
+        let name = device
+            .name()
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| addr.to_string());
+        devices.insert(name, addr);
+    }
+    devices
+}
 
 #[cfg(test)]
 mod tests {
