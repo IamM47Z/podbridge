@@ -4,6 +4,7 @@
 use crate::bluetooth::aacp::{BatteryComponent, BatteryInfo, BatteryStatus};
 
 const THRESHOLDS: [u8; 2] = [20, 10];
+const RESET_MARGIN: u8 = 10;
 
 /// The lowest threshold already alerted for each bud, per discharge.
 #[derive(Debug, Default)]
@@ -20,8 +21,9 @@ impl LowBatteryAlerts {
                 continue;
             }
             let last = self.alerted.iter().position(|(c, _)| *c == b.component);
-            // Charging, or back above every threshold, starts a new discharge.
-            if b.status == BatteryStatus::Charging || b.level > THRESHOLDS[0] {
+            // Charging, or well above every threshold, starts a new discharge.
+            // The margin keeps a level flickering at 20/21% from re-alerting.
+            if b.status == BatteryStatus::Charging || b.level > THRESHOLDS[0] + RESET_MARGIN {
                 if let Some(i) = last {
                     self.alerted.remove(i);
                 }
@@ -135,6 +137,37 @@ mod tests {
         a.check(&[left(18)]);
         a.check(&[bud(BatteryComponent::Left, 18, BatteryStatus::Charging)]);
         assert_eq!(a.check(&[left(18)]), [(BatteryComponent::Left, 18)]);
+    }
+
+    #[test]
+    fn flicker_at_twenty_alerts_once_but_a_real_rise_resets() {
+        let mut a = LowBatteryAlerts::default();
+        a.check(&[left(20)]);
+        assert!(a.check(&[left(21)]).is_empty());
+        assert!(a.check(&[left(20)]).is_empty());
+        a.check(&[left(31)]);
+        assert_eq!(a.check(&[left(18)]), [(BatteryComponent::Left, 18)]);
+    }
+
+    #[test]
+    fn only_the_discharging_bud_alerts() {
+        let mut a = LowBatteryAlerts::default();
+        let reports = [
+            left(15),
+            bud(BatteryComponent::Right, 15, BatteryStatus::Charging),
+        ];
+        assert_eq!(a.check(&reports), [(BatteryComponent::Left, 15)]);
+    }
+
+    #[test]
+    fn single_unit_headphones_alert_as_airpods() {
+        let mut a = LowBatteryAlerts::default();
+        let crossed = a.check(&[bud(
+            BatteryComponent::Headphone,
+            12,
+            BatteryStatus::NotCharging,
+        )]);
+        assert_eq!(alert_body(&crossed), "AirPods: 12%");
     }
 
     #[test]
