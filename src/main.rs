@@ -190,7 +190,10 @@ type DeviceMap = Arc<RwLock<HashMap<String, DeviceManagers>>>;
 fn load_managed_devices() -> (HashMap<String, DeviceData>, Vec<String>) {
     let devices_path = get_devices_path();
     let devices_json = std::fs::read_to_string(&devices_path).unwrap_or_else(|e| {
-        log::error!("Failed to read devices file: {}", e);
+        // Runs on every connect: a fresh install has no file yet.
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log::error!("Failed to read devices file: {}", e);
+        }
         "{}".to_string()
     });
     let devices_list: HashMap<String, DeviceData> = serde_json::from_str(&devices_json)
