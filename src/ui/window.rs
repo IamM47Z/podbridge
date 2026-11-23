@@ -44,7 +44,7 @@ pub fn start_ui(
     .theme(App::theme)
     .title(App::title)
     .settings(Settings {
-        id: Some("io.github.iamm47z.podbridge".to_string()),
+        id: Some(APP_ID.to_string()),
         fonts: vec![
             include_bytes!("../../assets/font/Inter-Regular.ttf")
                 .as_slice()
@@ -55,6 +55,9 @@ pub fn start_ui(
     })
     .run()
 }
+
+/// The basename of the desktop file; Wayland compositors match windows by it.
+const APP_ID: &str = "io.github.iamm47z.podbridge";
 
 pub struct App {
     window: Option<window::Id>,
@@ -350,6 +353,11 @@ fn main_window_settings() -> window::Settings {
     window::Settings {
         min_size: Some(Size::new(400.0, 300.0)),
         icon: window::icon::from_file_data(include_bytes!("../../assets/icon.png"), None).ok(),
+        // iced takes the Linux app_id from here; Settings.id only reaches the BSDs.
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: APP_ID.to_string(),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -400,3 +408,16 @@ async fn wait_for_message(ui_rx: Arc<Mutex<UnboundedReceiver<BluetoothUIMessage>
 //
 //     devices
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_window_has_the_desktop_file_app_id() {
+        assert_eq!(
+            main_window_settings().platform_specific.application_id,
+            APP_ID
+        );
+    }
+}
