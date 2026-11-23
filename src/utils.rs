@@ -3,6 +3,7 @@ use aes::cipher::Array;
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use iced::Theme;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// The folder name under the XDG data, config and state folders.
@@ -58,36 +59,67 @@ pub fn write_atomic(path: &std::path::Path, contents: &[u8]) -> std::io::Result<
     std::fs::rename(&tmp, path)
 }
 
-pub fn ensure_device_registered(mac: &str, name: &str, type_: crate::devices::enums::DeviceType) {
-    use crate::devices::enums::DeviceData;
-    use std::collections::HashMap;
+/// Serialises read-change-write of the devices file within the process.
+static DEVICES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    let path = get_devices_path();
-    let json = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
-    let mut devices: HashMap<String, DeviceData> = serde_json::from_str(&json).unwrap_or_default();
-    if devices.contains_key(mac) {
+/// Read the devices file, change it and write it back under one lock, so
+/// writers never undo each other's changes. `change` returns whether to write.
+/// A file that exists but cannot be read is left alone, so that the other
+/// devices in it are not overwritten.
+pub fn update_devices(
+    change: impl FnOnce(&mut HashMap<String, crate::devices::enums::DeviceData>) -> bool,
+) {
+    update_devices_at(&get_devices_path(), change);
+}
+
+fn update_devices_at(
+    path: &std::path::Path,
+    change: impl FnOnce(&mut HashMap<String, crate::devices::enums::DeviceData>) -> bool,
+) {
+    let _guard = DEVICES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut devices = match std::fs::read_to_string(path) {
+        Ok(json) => match serde_json::from_str(&json) {
+            Ok(devices) => devices,
+            Err(e) => {
+                log::error!("Devices file is unreadable, not changing it: {}", e);
+                return;
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(e) => {
+            log::error!("Failed to read devices file, not changing it: {}", e);
+            return;
+        }
+    };
+    if !change(&mut devices) {
         return;
     }
-    log::info!("Registering device {} ({}) as {:?}", name, mac, type_);
-    devices.insert(
-        mac.to_string(),
-        DeviceData {
-            name: name.to_string(),
-            type_,
-            information: None,
-        },
-    );
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     match serde_json::to_string(&devices) {
-        Ok(updated) => {
-            if let Err(e) = write_atomic(&path, updated.as_bytes()) {
+        Ok(json) => {
+            if let Err(e) = write_atomic(path, json.as_bytes()) {
                 log::error!("Failed to write devices file: {}", e);
             }
         }
         Err(e) => log::error!("Failed to serialize devices file: {}", e),
     }
+}
+
+pub fn ensure_device_registered(mac: &str, name: &str, type_: crate::devices::enums::DeviceType) {
+    update_devices(|devices| {
+        if devices.contains_key(mac) {
+            return false;
+        }
+        log::info!("Registering device {} ({}) as {:?}", name, mac, type_);
+        devices.insert(
+            mac.to_string(),
+            crate::devices::enums::DeviceData {
+                name: name.to_string(),
+                type_,
+                information: None,
+            },
+        );
+        true
+    });
 }
 
 pub fn get_preferences_path() -> PathBuf {
@@ -311,6 +343,51 @@ impl From<MyTheme> for Theme {
 
 #[cfg(test)]
 mod tests {
+    use crate::devices::enums::{DeviceData, DeviceType};
+
+    fn device(name: &str) -> DeviceData {
+        DeviceData {
+            name: name.to_string(),
+            type_: DeviceType::Nothing,
+            information: None,
+        }
+    }
+
+    fn temp_file(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("podbridge-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn update_devices_keeps_what_others_wrote() {
+        let path = temp_file("update-keeps.json");
+        super::update_devices_at(&path, |d| {
+            d.insert("a".into(), device("A"));
+            true
+        });
+        super::update_devices_at(&path, |d| {
+            d.insert("b".into(), device("B"));
+            true
+        });
+        let saved: std::collections::HashMap<String, DeviceData> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.contains_key("a") && saved.contains_key("b"));
+    }
+
+    #[test]
+    fn update_devices_leaves_an_unreadable_file_alone() {
+        let path = temp_file("update-corrupt.json");
+        std::fs::write(&path, "{not json").unwrap();
+        super::update_devices_at(&path, |d| {
+            d.insert("a".into(), device("A"));
+            true
+        });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{not json");
+    }
+
     #[test]
     fn test_paths_stay_out_of_the_user_folders() {
         let root = std::env::temp_dir().join(format!("podbridge-test-{}", std::process::id()));

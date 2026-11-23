@@ -1,13 +1,11 @@
 //! Handlers for device actions: adding a device and device state changes.
 
 use super::bluetooth::{device_type_from_file, noise_control_modes};
-use super::{App, Message, Tab, read_devices_list};
+use super::{App, Message, Tab};
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
-use crate::utils::get_devices_path;
 use bluer::Address;
 use iced::Task;
 use iced::widget::combo_box;
-use log::error;
 use std::collections::HashMap;
 
 impl App {
@@ -32,23 +30,17 @@ impl App {
         if let Some((name, addr)) = self.pending_add_device.take()
             && let Some(type_) = self.selected_device_type.take()
         {
-            let devices_path = get_devices_path();
-            let mut devices_list = read_devices_list();
-            devices_list.insert(
-                addr.to_string(),
-                DeviceData {
-                    name,
-                    type_,
-                    information: None,
-                },
-            );
-            let updated_json = serde_json::to_string(&devices_list).unwrap_or_else(|e| {
-                error!("Serialization failed: {}", e);
-                "{}".to_string()
+            crate::utils::update_devices(|devices| {
+                devices.insert(
+                    addr.to_string(),
+                    DeviceData {
+                        name,
+                        type_,
+                        information: None,
+                    },
+                );
+                true
             });
-            if let Err(e) = crate::utils::write_atomic(&devices_path, updated_json.as_bytes()) {
-                error!("Failed to write devices file: {}", e);
-            }
             self.selected_tab = Tab::Device(addr.to_string());
         }
         Task::none()

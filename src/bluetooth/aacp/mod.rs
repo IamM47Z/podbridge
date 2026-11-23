@@ -1,12 +1,10 @@
 use crate::devices::airpods::AirPodsInformation;
 use crate::devices::enums::{DeviceData, DeviceInformation, DeviceType};
-use crate::utils::get_devices_path;
 use bluer::{
     Address, AddressType, Error, Result,
     l2cap::{SeqPacket, Socket, SocketAddr},
 };
 use log::{debug, error, info, warn};
-use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -74,7 +72,6 @@ pub struct AACPManagerState {
     pub old_ear_detection_status: Vec<EarDetectionStatus>,
     pub ear_detection_status: Vec<EarDetectionStatus>,
     event_tx: Option<mpsc::UnboundedSender<AACPEvent>>,
-    pub devices: HashMap<String, DeviceData>,
     pub airpods_mac: Option<Address>,
     /// When set, recv_thread forwards raw 0x58 audio SDUs here (hi-res mic).
     pub audio_tx: Option<mpsc::Sender<Vec<u8>>>,
@@ -82,10 +79,6 @@ pub struct AACPManagerState {
 
 impl AACPManagerState {
     fn new() -> Self {
-        let devices: HashMap<String, DeviceData> = std::fs::read_to_string(get_devices_path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
         AACPManagerState {
             sender: None,
             control_command_status_list: Vec::new(),
@@ -99,7 +92,6 @@ impl AACPManagerState {
             old_ear_detection_status: Vec::new(),
             ear_detection_status: Vec::new(),
             event_tx: None,
-            devices,
             airpods_mac: None,
             audio_tx: None,
         }
@@ -593,25 +585,26 @@ impl AACPManager {
                         enc_key: "".to_string(),
                     },
                 };
-                let mut state = self.state.lock().await;
-                if let Some(mac) = state.airpods_mac
-                    && let Some(device_data) = state.devices.get_mut(&mac.to_string())
-                {
-                    // The Information packet carries no LE keys; keep the ones the
-                    // Proximity Keys response stored, or the LE monitor can't match.
-                    if let Some(DeviceInformation::AirPods(old)) = &device_data.information {
-                        info.le_keys = old.le_keys.clone();
-                    }
-                    device_data.name = info.name.clone();
-                    device_data.information =
-                        Some(DeviceInformation::AirPods(Box::new(info.clone())));
-                }
-                let json = serde_json::to_string(&state.devices);
                 // Don't hold the AACP state lock across disk I/O: every incoming
                 // packet needs it.
-                drop(state);
-                save_devices_json(json).await;
+                let mac = self.state.lock().await.airpods_mac;
                 info!("Received Information: {:?}", info);
+                if let Some(mac) = mac {
+                    update_devices_off_runtime(move |devices| {
+                        let Some(device_data) = devices.get_mut(&mac.to_string()) else {
+                            return false;
+                        };
+                        // The Information packet carries no LE keys; keep the ones the
+                        // Proximity Keys response stored, or the LE monitor can't match.
+                        if let Some(DeviceInformation::AirPods(old)) = &device_data.information {
+                            info.le_keys = old.le_keys.clone();
+                        }
+                        device_data.name = info.name.clone();
+                        device_data.information = Some(DeviceInformation::AirPods(Box::new(info)));
+                        true
+                    })
+                    .await;
+                }
             }
             Packet::ProximityKeys(keys) => {
                 // Key material (IRK, encryption key) is secret: it identifies the
@@ -623,61 +616,14 @@ impl AACPManager {
                         .map(|k| format!("type {}: {} bytes", k.key_type, k.data.len()))
                         .collect::<Vec<_>>()
                 );
-                let mut state = self.state.lock().await;
-                for key in &keys {
-                    if let Some(kt) = ProximityKeyType::from_u8(key.key_type)
-                        && let Some(mac) = state.airpods_mac
-                    {
-                        let mac_str = mac.to_string();
-                        let device_data =
-                            state.devices.entry(mac_str.clone()).or_insert(DeviceData {
-                                name: mac_str.clone(),
-                                type_: DeviceType::AirPods,
-                                information: None,
-                            });
-                        // The proximity key response is sent before the INFORMATION packet, so
-                        // there is often no information entry yet. Create a stub instead of
-                        // dropping the keys: without the IRK, RPA matching in the LE monitor can
-                        // never succeed and auto-connect never fires.
-                        if !matches!(device_data.information, Some(DeviceInformation::AirPods(_))) {
-                            device_data.information =
-                                Some(DeviceInformation::AirPods(Box::new(AirPodsInformation {
-                                    name: device_data.name.clone(),
-                                    model_number: String::new(),
-                                    manufacturer: String::new(),
-                                    serial_number: String::new(),
-                                    version1: String::new(),
-                                    version2: String::new(),
-                                    hardware_revision: String::new(),
-                                    updater_identifier: String::new(),
-                                    left_serial_number: String::new(),
-                                    right_serial_number: String::new(),
-                                    version3: String::new(),
-                                    le_keys: AirPodsLEKeys {
-                                        irk: String::new(),
-                                        enc_key: String::new(),
-                                    },
-                                })));
-                        }
-                        if let Some(DeviceInformation::AirPods(info)) =
-                            device_data.information.as_mut()
-                        {
-                            match kt {
-                                ProximityKeyType::Irk => {
-                                    info.le_keys.irk = hex::encode(&key.data);
-                                }
-                                ProximityKeyType::EncKey => {
-                                    info.le_keys.enc_key = hex::encode(&key.data);
-                                }
-                            }
-                        }
-                    }
-                }
-                let json = serde_json::to_string(&state.devices);
-                // Don't hold the AACP state lock across disk I/O: every incoming
-                // packet needs it.
-                drop(state);
-                save_devices_json(json).await;
+                let Some(mac) = self.state.lock().await.airpods_mac else {
+                    return;
+                };
+                update_devices_off_runtime(move |devices| {
+                    store_proximity_keys(devices, &mac.to_string(), &keys);
+                    true
+                })
+                .await;
             }
             Packet::StemPress(press, bud) => {
                 info!("Received Stem Press: {:?} on {:?}", press, bud);
@@ -858,22 +804,61 @@ fn invalid_mac(e: InvalidMac) -> Error {
 }
 
 /// Persist the devices file (atomically, off the async runtime).
-async fn save_devices_json(json: serde_json::Result<String>) {
-    let json = match json {
-        Ok(j) => j,
-        Err(e) => {
-            error!("Failed to serialize devices: {}", e);
-            return;
+/// update_devices on a blocking thread: it does disk I/O.
+async fn update_devices_off_runtime(
+    change: impl FnOnce(&mut HashMap<String, DeviceData>) -> bool + Send + 'static,
+) {
+    if let Err(e) = tokio::task::spawn_blocking(move || crate::utils::update_devices(change)).await
+    {
+        error!("Failed to save devices: {}", e);
+    }
+}
+
+/// Store the IRK and encryption key in the device's entry.
+fn store_proximity_keys(
+    devices: &mut HashMap<String, DeviceData>,
+    mac_str: &str,
+    keys: &[ProximityKey],
+) {
+    for key in keys {
+        let Some(kt) = ProximityKeyType::from_u8(key.key_type) else {
+            continue;
+        };
+        let device_data = devices.entry(mac_str.to_string()).or_insert(DeviceData {
+            name: mac_str.to_string(),
+            type_: DeviceType::AirPods,
+            information: None,
+        });
+        // The proximity key response is sent before the INFORMATION packet, so
+        // there is often no information entry yet. Create a stub instead of
+        // dropping the keys: without the IRK, RPA matching in the LE monitor can
+        // never succeed and auto-connect never fires.
+        if !matches!(device_data.information, Some(DeviceInformation::AirPods(_))) {
+            device_data.information =
+                Some(DeviceInformation::AirPods(Box::new(AirPodsInformation {
+                    name: device_data.name.clone(),
+                    model_number: String::new(),
+                    manufacturer: String::new(),
+                    serial_number: String::new(),
+                    version1: String::new(),
+                    version2: String::new(),
+                    hardware_revision: String::new(),
+                    updater_identifier: String::new(),
+                    left_serial_number: String::new(),
+                    right_serial_number: String::new(),
+                    version3: String::new(),
+                    le_keys: AirPodsLEKeys {
+                        irk: String::new(),
+                        enc_key: String::new(),
+                    },
+                })));
         }
-    };
-    let result = tokio::task::spawn_blocking(move || {
-        crate::utils::write_atomic(&get_devices_path(), json.as_bytes())
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => error!("Failed to save devices: {}", e),
-        Err(e) => error!("Failed to save devices: {}", e),
+        if let Some(DeviceInformation::AirPods(info)) = device_data.information.as_mut() {
+            match kt {
+                ProximityKeyType::Irk => info.le_keys.irk = hex::encode(&key.data),
+                ProximityKeyType::EncKey => info.le_keys.enc_key = hex::encode(&key.data),
+            }
+        }
     }
 }
 

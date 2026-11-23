@@ -187,14 +187,20 @@ impl HiResMic {
     pub async fn start(aacp: &AACPManager, addr: String, status: MicStatus) -> Option<HiResMic> {
         // Name it after the AirPods exactly, like their output, so the desktop
         // shows one AirPods microphone.
-        let device_name = aacp
-            .state
-            .lock()
+        let device_name = {
+            let addr = addr.clone();
+            blocking(move || {
+                let json = std::fs::read_to_string(crate::utils::get_devices_path()).ok()?;
+                let devices: std::collections::HashMap<String, crate::devices::enums::DeviceData> =
+                    serde_json::from_str(&json).ok()?;
+                devices
+                    .get(&addr)
+                    .map(|d| d.name.trim().to_string())
+                    .filter(|n| !n.is_empty() && n != &addr)
+            })
             .await
-            .devices
-            .get(&addr)
-            .map(|d| d.name.trim().to_string())
-            .filter(|n| !n.is_empty() && n != &addr);
+            .flatten()
+        };
         let mic_name = match device_name {
             Some(name) => name,
             None => "AirPods".to_string(),
