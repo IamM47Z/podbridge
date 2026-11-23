@@ -11,5 +11,11 @@ Tristan Collins, Cem Ali, tboris, Luan Ademi, Ramfi Aogusto, injkgz,
 Sriharsha Chintalapani, Michał Matczuk, Ousama Ben Younes and Lasse Götte.
 Their authorship is recorded in the LibrePods history.
 
+Bundled fonts keep their own licenses:
+- assets/font/Inter-Regular.ttf: Inter 4.1, (c) The Inter Project Authors,
+  SIL Open Font License 1.1, see assets/font/Inter-OFL.txt.
+- assets/font/DejaVuSans.ttf: DejaVu Sans, (c) Bitstream and the DejaVu
+  authors, see assets/font/DejaVu-LICENSE.txt.
+
 podbridge is distributed under the same license, the GNU Affero General
 Public License v3.0. See LICENSE.

@@ -57,11 +57,11 @@ pub fn start_ui(
     .settings(Settings {
         id: Some("io.github.iamm47z.podbridge".to_string()),
         fonts: vec![
-            include_bytes!("../../assets/font/sf_pro.otf")
+            include_bytes!("../../assets/font/Inter-Regular.ttf")
                 .as_slice()
                 .into(),
         ],
-        default_font: Font::with_name("SF Pro Text"),
+        default_font: Font::with_name("Inter"),
         ..Settings::default()
     })
     .run()
