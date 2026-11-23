@@ -167,8 +167,6 @@ async fn async_main(
     let rule = MatchRule::new_signal("org.freedesktop.DBus.Properties", "PropertiesChanged");
     let watcher = ConnectionWatcher {
         backend: backend.clone(),
-        managed_devices_mac: managed_devices_mac.clone(),
-        devices_list: devices_list.clone(),
     };
     conn.add_match(rule, move |_: (), conn, msg| {
         watcher.on_properties_changed(conn, msg);
@@ -324,8 +322,6 @@ impl Backend {
 /// Reacts to BlueZ device connection changes.
 struct ConnectionWatcher {
     backend: Backend,
-    managed_devices_mac: Vec<String>,
-    devices_list: HashMap<String, DeviceData>,
 }
 
 impl ConnectionWatcher {
@@ -373,10 +369,11 @@ impl ConnectionWatcher {
             }
             return;
         }
-        if self.managed_devices_mac.contains(&addr_str) {
+        // Read the file on each connect: devices added in the UI since startup count.
+        let (devices_list, managed_devices_mac) = load_managed_devices();
+        if managed_devices_mac.contains(&addr_str) {
             info!("Managed device connected: {}, initializing", addr_str);
-            if self
-                .devices_list
+            if devices_list
                 .get(&addr_str)
                 .is_some_and(|d| d.type_ == devices::enums::DeviceType::Nothing)
             {

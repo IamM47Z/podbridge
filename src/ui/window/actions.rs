@@ -30,6 +30,9 @@ impl App {
         if let Some((name, addr)) = self.pending_add_device.take()
             && let Some(type_) = self.selected_device_type.take()
         {
+            // shortcut: the backend starts a device when it connects, so one that is
+            // connected while it is added is managed from its next connection. To
+            // manage it at once, send the backend a message to set it up.
             crate::utils::update_devices(|devices| {
                 devices.insert(
                     addr.to_string(),
