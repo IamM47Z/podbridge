@@ -10,6 +10,9 @@ use iced::Task;
 use iced::widget::combo_box;
 use log::error;
 use std::collections::HashMap;
+use std::time::Duration;
+
+const ADAPTIVE_STRENGTH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 impl App {
     pub(super) fn got_paired_devices(&mut self, map: HashMap<String, Address>) -> Task<Message> {
@@ -52,7 +55,30 @@ impl App {
         Task::none()
     }
 
-    pub(super) fn send_adaptive_strength(&self, mac: &str, level: u8) -> Task<Message> {
+    /// Show the new level at once; send it once the slider has been still for
+    /// ADAPTIVE_STRENGTH_DEBOUNCE, like the Android client. Covers drags, taps,
+    /// arrow keys and scrolling alike.
+    pub(super) fn adaptive_strength_changed(&mut self, mac: String, level: u8) -> Task<Message> {
+        if let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) {
+            state.adaptive_strength = Some(level);
+        }
+        self.adaptive_strength_generation += 1;
+        let generation = self.adaptive_strength_generation;
+        Task::perform(tokio::time::sleep(ADAPTIVE_STRENGTH_DEBOUNCE), move |_| {
+            Message::AdaptiveStrengthSettled(mac.clone(), generation)
+        })
+    }
+
+    pub(super) fn adaptive_strength_settled(&self, mac: &str, generation: u64) -> Task<Message> {
+        if generation != self.adaptive_strength_generation {
+            return Task::none();
+        }
+        let Some(DeviceState::AirPods(state)) = self.device_states.get(mac) else {
+            return Task::none();
+        };
+        let Some(level) = state.adaptive_strength else {
+            return Task::none();
+        };
         let Some(aacp) = self
             .device_managers
             .blocking_read()

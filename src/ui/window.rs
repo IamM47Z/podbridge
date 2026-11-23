@@ -83,6 +83,8 @@ pub struct App {
     a2dp_reset: bool,
     audio_off_when_not_wearing: bool,
     pause_when_one_removed: bool,
+    /// Bumped on each adaptive strength slider move; only the last move sends.
+    adaptive_strength_generation: u64,
 }
 
 pub struct BluetoothState {
@@ -113,8 +115,10 @@ pub enum Message {
     ConfirmAddDevice,
     CancelAddDevice,
     StateChanged(String, DeviceState),
-    /// The adaptive strength slider was let go: send its level (mac, level).
-    AdaptiveStrengthReleased(String, u8),
+    /// The adaptive strength slider moved (mac, level).
+    AdaptiveStrengthChanged(String, u8),
+    /// The debounce after a slider move ran out (mac, generation).
+    AdaptiveStrengthSettled(String, u64),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
     StemControlChanged(bool),
     A2dpResetChanged(bool),
@@ -216,6 +220,7 @@ impl App {
                 paired_devices: HashMap::new(),
                 device_states,
                 pending_add_device: None,
+                adaptive_strength_generation: 0,
                 device_type_state: combo_box::State::new(vec![DeviceType::Nothing]),
                 selected_device_type: None,
                 device_managers,
@@ -292,8 +297,11 @@ impl App {
             Message::ConfirmAddDevice => self.confirm_add_device(),
             Message::CancelAddDevice => self.cancel_add_device(),
             Message::StateChanged(mac, state) => self.state_changed(mac, state),
-            Message::AdaptiveStrengthReleased(mac, level) => {
-                self.send_adaptive_strength(&mac, level)
+            Message::AdaptiveStrengthChanged(mac, level) => {
+                self.adaptive_strength_changed(mac, level)
+            }
+            Message::AdaptiveStrengthSettled(mac, generation) => {
+                self.adaptive_strength_settled(&mac, generation)
             }
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),
             Message::TrayTextModeChanged(on) => self.change_setting(|app| app.tray_text_mode = on),

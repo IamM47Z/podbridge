@@ -158,8 +158,8 @@ fn listening_mode_section<'a>(
 }
 
 /// Adaptive mode's strength slider, like Apple's "Customize Adaptive Audio".
-/// Shown only in Adaptive mode on AirPods that report the setting. Dragging
-/// only moves the slider; releasing it sends the level once.
+/// Shown only in Adaptive mode on AirPods that report the setting. The App
+/// sends the level once the slider has been still for a moment.
 fn adaptive_strength_row<'a>(
     mac: &str,
     state: &'a AirPodsState,
@@ -168,21 +168,14 @@ fn adaptive_strength_row<'a>(
         return None;
     }
     let level = state.adaptive_strength?;
-    let on_change = {
-        let mac = mac.to_string();
-        let state = state.clone();
-        move |value: f32| {
-            let mut state = state.clone();
-            state.adaptive_strength = Some(level_from_slider(value));
-            Message::StateChanged(mac.clone(), DeviceState::AirPods(state))
-        }
-    };
+    let mac = mac.to_string();
     Some(
         row![
             text("Less noise").size(14).style(style::text_muted),
-            slider(0.0..=100.0, slider_from_level(level), on_change)
-                .step(1.0_f32)
-                .on_release(Message::AdaptiveStrengthReleased(mac.to_string(), level)),
+            slider(0.0..=100.0, slider_from_level(level), move |value: f32| {
+                Message::AdaptiveStrengthChanged(mac.clone(), level_from_slider(value))
+            })
+            .step(1.0_f32),
             text("More noise").size(14).style(style::text_muted),
         ]
         .spacing(12)
