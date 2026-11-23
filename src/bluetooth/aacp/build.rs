@@ -3,7 +3,7 @@
 
 use super::{ControlCommandIdentifiers, ProximityKeyType, opcodes};
 
-/// A MAC address string that is not colon-separated hex.
+/// A MAC address string that is not six colon-separated hex bytes.
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidMac(pub String);
 
