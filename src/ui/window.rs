@@ -20,13 +20,12 @@ use iced::widget::{
     text_input, toggler,
 };
 use iced::{
-    Background, Border, Center, Element, Font, Length, Padding, Program, Settings, Size,
-    Subscription, Task, Theme, daemon, window,
+    Background, Border, Center, Element, Font, Length, Padding, Settings, Size, Subscription, Task,
+    Theme, daemon, window,
 };
 use log::{debug, error};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, RwLock};
@@ -114,7 +113,7 @@ pub enum Message {
     SelectTab(Tab),
     ThemeSelected(MyTheme),
     CopyToClipboard(String),
-    BluetoothMessage(BluetoothUIMessage),
+    Bluetooth(BluetoothUIMessage),
     // ShowNewDialogTab,
     GotPairedDevices(HashMap<String, Address>),
     StartAddDevice(String, Address),
@@ -285,7 +284,7 @@ impl App {
             }
             Message::CopyToClipboard(data) => iced::clipboard::write(data),
             Message::MicLevelTick => Task::none(),
-            Message::BluetoothMessage(ui_message) => {
+            Message::Bluetooth(ui_message) => {
                 match ui_message {
                     BluetoothUIMessage::NoOp => {
                         let ui_rx = Arc::clone(&self.ui_rx);
@@ -790,15 +789,19 @@ impl App {
                             if is_selected {
                                 let mut style = Style::default()
                                     .with_background(theme.palette().primary);
-                                let mut border = Border::default();
-                                border.color = theme.palette().text;
+                                let border = Border {
+                                    color: theme.palette().text,
+                                    ..Default::default()
+                                };
                                 style.border = border.rounded(12);
                                 style
                             } else {
                                 let mut style = Style::default()
                                     .with_background(theme.palette().primary.scale_alpha(0.1));
-                                let mut border = Border::default();
-                                border.color = theme.palette().primary.scale_alpha(0.1);
+                                let border = Border {
+                                    color: theme.palette().primary.scale_alpha(0.1),
+                                    ..Default::default()
+                                };
                                 style.border = border.rounded(8);
                                 style.text_color = theme.palette().text;
                                 style
@@ -822,15 +825,19 @@ impl App {
                             if is_selected {
                                 let mut style = Style::default()
                                     .with_background(theme.palette().primary);
-                                let mut border = Border::default();
-                                border.color = theme.palette().text;
+                                let border = Border {
+                                    color: theme.palette().text,
+                                    ..Default::default()
+                                };
                                 style.border = border.rounded(12);
                                 style
                             } else {
                                 let mut style = Style::default()
                                     .with_background(theme.palette().primary.scale_alpha(0.1));
-                                let mut border = Border::default();
-                                border.color = theme.palette().primary.scale_alpha(0.1);
+                                let border = Border {
+                                    color: theme.palette().primary.scale_alpha(0.1),
+                                    ..Default::default()
+                                };
                                 style.border = border.rounded(8);
                                 style.text_color = theme.palette().text;
                                 style
@@ -927,7 +934,6 @@ impl App {
                                 debug!("Rendering device view for {}: type={:?}, state={:?}", id, device_type, device_state);
                                 match device_type {
                                     Some(DeviceType::AirPods) => {
-
                                         device_state.as_ref().and_then(|state| {
                                             match state {
                                                 DeviceState::AirPods(state) => {
@@ -995,9 +1001,9 @@ impl App {
                                         text("Use text in tray").size(16),
                                         text("Use text for battery status in tray instead of a progress bar.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1019,10 +1025,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1033,9 +1043,9 @@ impl App {
                                 container(
                                     text("Appearance").size(20).style(
                                         |theme: &Theme| {
-                                            let mut style = text::Style::default();
-                                            style.color = Some(theme.palette().primary);
-                                            style
+                                            text::Style {
+                                                color: Some(theme.palette().primary),
+                                            }
                                         }
                                     )
                                 )
@@ -1106,10 +1116,14 @@ impl App {
                                     })
                                     .style(
                                         |theme: &Theme| {
-                                            let mut style = container::Style::default();
-                                            style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                            let mut border = Border::default();
-                                            border.color = theme.palette().primary.scale_alpha(0.5);
+                                            let mut style = container::Style {
+                                                background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                ..Default::default()
+                                            };
+                                            let border = Border {
+                                                color: theme.palette().primary.scale_alpha(0.5),
+                                                ..Default::default()
+                                            };
                                             style.border = border.rounded(16);
                                             style
                                         }
@@ -1124,9 +1138,9 @@ impl App {
                                         text("Stem press track control").size(16),
                                         text("Double press = next track, triple press = previous track. Disable if your environment handles AirPods AVRCP commands natively.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1148,10 +1162,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1165,9 +1183,9 @@ impl App {
                                         text("Switch audio away when both buds are out").size(16),
                                         text("After both buds have been out for 4 seconds, apps move to another output and microphone (speakers, headset, webcam). They move back to the AirPods when a bud goes in again. Media pauses right away either way.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1189,10 +1207,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1207,9 +1229,9 @@ impl App {
                                         text("Pause when one bud is removed").size(16),
                                         text("Pause media when you take one bud out, like an iPhone, and resume when it goes back in. When off, playback continues in the other bud.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1231,10 +1253,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1250,9 +1276,9 @@ impl App {
                                         text("Reset A2DP transport").size(16),
                                         text("Briefly pauses and resumes the AirPods audio after the hi-res mic turns off. Without it, playback continues in only one earbud until the mic is used again or the AirPods reconnect.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1274,10 +1300,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1291,9 +1321,9 @@ impl App {
                                         text("Hi-res mic auto gain").size(16),
                                         text("Automatically normalizes the hi-res microphone level. For most usecases this should remain on. Disable for a raw, unprocessed capture.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1315,10 +1345,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1332,9 +1366,9 @@ impl App {
                                         text("Pause conversation awareness during capture").size(16),
                                         text("Turns off conversation awareness while the hi-res microphone is capturing, then restores it afterwards.").size(12).style(
                                             |theme: &Theme| {
-                                                let mut style = text::Style::default();
-                                                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                                style
+                                                text::Style {
+                                                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                                                }
                                             }
                                         ).width(Length::Fill)
                                     ].width(Length::Fill),
@@ -1356,10 +1390,14 @@ impl App {
                                         })
                                         .style(
                                             |theme: &Theme| {
-                                                let mut style = container::Style::default();
-                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                let mut border = Border::default();
-                                                border.color = theme.palette().primary.scale_alpha(0.5);
+                                                let mut style = container::Style {
+                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                    ..Default::default()
+                                                };
+                                                let border = Border {
+                                                    color: theme.palette().primary.scale_alpha(0.5),
+                                                    ..Default::default()
+                                                };
                                                 style.border = border.rounded(16);
                                                 style
                                             }
@@ -1370,9 +1408,9 @@ impl App {
                                 container(
                                     text("Controls").size(20).style(
                                         |theme: &Theme| {
-                                            let mut style = text::Style::default();
-                                            style.color = Some(theme.palette().primary);
-                                            style
+                                            text::Style {
+                                                color: Some(theme.palette().primary),
+                                            }
                                         }
                                     )
                                 )
@@ -1433,15 +1471,16 @@ impl App {
                                                         )
                                                             .style(
                                                                 |theme: &Theme, _status| {
-                                                                    let mut style = Style::default();
-                                                                    style.text_color = theme.palette().text;
-                                                                    style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.5)));
-                                                                    style.border = Border {
+                                                                    Style {
+                                                                        text_color: theme.palette().text,
+                                                                        background: Some(Background::Color(theme.palette().primary.scale_alpha(0.5))),
+                                                                        border: Border {
                                                                         width: 1.0,
                                                                         color: theme.palette().primary,
                                                                         radius: Radius::from(8.0),
-                                                                    };
-                                                                    style
+                                                                    },
+                                                                        ..Default::default()
+                                                                    }
                                                                 }
                                                             )
                                                             .padding(8)
@@ -1504,11 +1543,12 @@ impl App {
                                                                 button(text("Cancel").size(16).width(Length::Fill).center())
                                                                     .on_press(Message::CancelAddDevice)
                                                                     .style(|theme: &Theme, _status| {
-                                                                        let mut style = Style::default();
-                                                                        style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                                        style.text_color = theme.palette().text;
-                                                                        style.border = Border::default().rounded(8.0);
-                                                                        style
+                                                                        Style {
+                                                                            background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                                            text_color: theme.palette().text,
+                                                                            border: Border::default().rounded(8.0),
+                                                                            ..Default::default()
+                                                                        }
                                                                     })
                                                                     .width(Length::from(120))
                                                                     .padding(4),
@@ -1516,11 +1556,12 @@ impl App {
                                                                 button(text("Add Device").size(16).width(Length::Fill).center())
                                                                     .on_press(Message::ConfirmAddDevice)
                                                                     .style(|theme: &Theme, _status| {
-                                                                        let mut style = Style::default();
-                                                                        style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.3)));
-                                                                        style.text_color = theme.palette().text;
-                                                                        style.border = Border::default().rounded(8.0);
-                                                                        style
+                                                                        Style {
+                                                                            background: Some(Background::Color(theme.palette().primary.scale_alpha(0.3))),
+                                                                            text_color: theme.palette().text,
+                                                                            border: Border::default().rounded(8.0),
+                                                                            ..Default::default()
+                                                                        }
                                                                     })
                                                                     .width(Length::from(120))
                                                                     .padding(4),
@@ -1534,10 +1575,14 @@ impl App {
                                                         .padding(8)
                                                         .style(
                                                             |theme: &Theme| {
-                                                                let mut style = container::Style::default();
-                                                                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                                                                let mut border = Border::default();
-                                                                border.color = theme.palette().text;
+                                                                let mut style = container::Style {
+                                                                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                                                                    ..Default::default()
+                                                                };
+                                                                let border = Border {
+                                                                    color: theme.palette().text,
+                                                                    ..Default::default()
+                                                                };
                                                                 style.border = border.rounded(8);
                                                                 style
                                                             }
@@ -1600,19 +1645,20 @@ impl App {
 }
 
 fn main_window_settings() -> window::Settings {
-    let mut settings = window::Settings::default();
-    settings.min_size = Some(Size::new(400.0, 300.0));
-    settings.icon = window::icon::from_file("../../assets/icon.png").ok();
-    settings
+    window::Settings {
+        min_size: Some(Size::new(400.0, 300.0)),
+        icon: window::icon::from_file("../../assets/icon.png").ok(),
+        ..Default::default()
+    }
 }
 
 async fn wait_for_message(ui_rx: Arc<Mutex<UnboundedReceiver<BluetoothUIMessage>>>) -> Message {
     let mut rx = ui_rx.lock().await;
     match rx.recv().await {
-        Some(msg) => Message::BluetoothMessage(msg),
+        Some(msg) => Message::Bluetooth(msg),
         None => {
             error!("UI message channel closed");
-            Message::BluetoothMessage(BluetoothUIMessage::NoOp)
+            Message::Bluetooth(BluetoothUIMessage::NoOp)
         }
     }
 }

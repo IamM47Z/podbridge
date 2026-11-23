@@ -72,8 +72,7 @@ pub fn active_profile(card: CardRef) -> Option<String> {
     };
     wait_op(&mut mainloop, &op);
     drop(op);
-    let result = profile.borrow().clone();
-    result
+    profile.borrow().clone()
 }
 
 fn set_profile_unlocked(card: CardRef, profile: &str) -> bool {
@@ -124,8 +123,7 @@ pub fn best_headset_profile(card: &str) -> Option<String> {
     });
     wait_op(&mut mainloop, &op);
     drop(op);
-    let result = best.borrow().clone().map(|(_, n)| n);
-    result
+    best.borrow().clone().map(|(_, n)| n)
 }
 
 /// Set a card profile, serialized with every other profile change. Returns the
@@ -251,8 +249,7 @@ fn sinks_of_card(card_index: u32) -> Vec<u32> {
     });
     wait_op(&mut mainloop, &op);
     drop(op);
-    let result = sinks.borrow().clone();
-    result
+    sinks.borrow().clone()
 }
 
 /// A playback stream remembered while the AirPods' card is off. PipeWire reuses
@@ -312,8 +309,7 @@ fn list_streams() -> Vec<(SavedStream, u32)> {
     });
     wait_op(&mut mainloop, &op);
     drop(op);
-    let result = streams.borrow().clone();
-    result
+    streams.borrow().clone()
 }
 
 /// Playback streams currently going to a card's sinks.

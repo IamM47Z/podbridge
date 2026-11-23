@@ -24,26 +24,28 @@ pub fn nothing_view<'a>(
         && let Some(DeviceInformation::Nothing(ref nothing_info)) = device.information
     {
         information_col = information_col
-            .push(text("Device Information").size(18).style(|theme: &Theme| {
-                let mut style = text::Style::default();
-                style.color = Some(theme.palette().primary);
-                style
-            }))
+            .push(
+                text("Device Information")
+                    .size(18)
+                    .style(|theme: &Theme| text::Style {
+                        color: Some(theme.palette().primary),
+                    }),
+            )
             .push(Space::new().height(iced::Length::from(10)))
             .push(iced::widget::row![
                 text("Serial Number").size(16).style(|theme: &Theme| {
-                    let mut style = text::Style::default();
-                    style.color = Some(theme.palette().text);
-                    style
+                    text::Style {
+                        color: Some(theme.palette().text),
+                    }
                 }),
                 Space::new().width(Length::Fill),
                 text(nothing_info.serial_number.clone()).size(16)
             ])
             .push(iced::widget::row![
                 text("Firmware Version").size(16).style(|theme: &Theme| {
-                    let mut style = text::Style::default();
-                    style.color = Some(theme.palette().text);
-                    style
+                    text::Style {
+                        color: Some(theme.palette().text),
+                    }
                 }),
                 Space::new().width(Length::Fill),
                 text(nothing_info.firmware_version.clone()).size(16)
@@ -53,9 +55,9 @@ pub fn nothing_view<'a>(
     let noise_control_mode = container(
         row![
             text("Noise Control Mode").size(16).style(|theme: &Theme| {
-                let mut style = text::Style::default();
-                style.color = Some(theme.palette().text);
-                style
+                text::Style {
+                    color: Some(theme.palette().text),
+                }
             }),
             Space::new().width(Length::Fill),
             {
@@ -150,10 +152,14 @@ pub fn nothing_view<'a>(
         right: 18.0,
     })
     .style(|theme: &Theme| {
-        let mut style = container::Style::default();
-        style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-        let mut border = Border::default();
-        border.color = theme.palette().primary.scale_alpha(0.5);
+        let mut style = container::Style {
+            background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+            ..Default::default()
+        };
+        let border = Border {
+            color: theme.palette().primary.scale_alpha(0.5),
+            ..Default::default()
+        };
         style.border = border.rounded(16);
         style
     });
@@ -163,11 +169,14 @@ pub fn nothing_view<'a>(
         Space::new().height(Length::from(20)),
         container(information_col)
             .style(|theme: &Theme| {
-                let mut style = container::Style::default();
-                style.background =
-                    Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                let mut border = Border::default();
-                border.color = theme.palette().text;
+                let mut style = container::Style {
+                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                    ..Default::default()
+                };
+                let border = Border {
+                    color: theme.palette().text,
+                    ..Default::default()
+                };
                 style.border = border.rounded(20);
                 style
             })

@@ -33,9 +33,9 @@ pub fn airpods_view<'a>(
         row![
             Space::new().width(10),
             text("Name").size(16).style(|theme: &Theme| {
-                let mut style = text::Style::default();
-                style.color = Some(theme.palette().text);
-                style
+                text::Style {
+                    color: Some(theme.palette().text),
+                }
             }),
             Space::new().width(Length::Fill),
             text_input("", &state.device_name)
@@ -87,10 +87,14 @@ pub fn airpods_view<'a>(
         right: 10.0,
     })
     .style(|theme: &Theme| {
-        let mut style = container::Style::default();
-        style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-        let mut border = Border::default();
-        border.color = theme.palette().primary.scale_alpha(0.5);
+        let mut style = container::Style {
+            background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+            ..Default::default()
+        };
+        let border = Border {
+            color: theme.palette().primary.scale_alpha(0.5),
+            ..Default::default()
+        };
         style.border = border.rounded(16);
         style
     });
@@ -98,9 +102,9 @@ pub fn airpods_view<'a>(
     let listening_mode = container(
         row![
             text("Listening Mode").size(16).style(|theme: &Theme| {
-                let mut style = text::Style::default();
-                style.color = Some(theme.palette().text);
-                style
+                text::Style {
+                    color: Some(theme.palette().text),
+                }
             }),
             Space::new().width(Length::Fill),
             {
@@ -180,10 +184,14 @@ pub fn airpods_view<'a>(
         right: 18.0,
     })
     .style(|theme: &Theme| {
-        let mut style = container::Style::default();
-        style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-        let mut border = Border::default();
-        border.color = theme.palette().primary.scale_alpha(0.5);
+        let mut style = container::Style {
+            background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+            ..Default::default()
+        };
+        let border = Border {
+            color: theme.palette().primary.scale_alpha(0.5),
+            ..Default::default()
+        };
         style.border = border.rounded(16);
         style
     });
@@ -195,9 +203,9 @@ pub fn airpods_view<'a>(
         container(
             text("Audio Settings").size(18).style(
                 |theme: &Theme| {
-                    let mut style = text::Style::default();
-                    style.color = Some(theme.palette().primary);
-                    style
+                    text::Style {
+                        color: Some(theme.palette().primary),
+                    }
                 }
             )
         )
@@ -217,9 +225,9 @@ pub fn airpods_view<'a>(
                             text("Personalized Volume").size(16),
                             text("Adjusts the volume in response to your environment.").size(12).style(
                                 |theme: &Theme| {
-                                    let mut style = text::Style::default();
-                                    style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                    style
+                                    text::Style {
+                                        color: Some(theme.palette().text.scale_alpha(0.7)),
+                                    }
                                 }
                             ).width(Length::Fill),
                         ].width(Length::Fill),
@@ -268,9 +276,9 @@ pub fn airpods_view<'a>(
                             text("Conversation Awareness").size(16),
                             text("Lowers the volume of your audio when it detects that you are speaking.").size(12).style(
                                 |theme: &Theme| {
-                                    let mut style = text::Style::default();
-                                    style.color = Some(theme.palette().text.scale_alpha(0.7));
-                                    style
+                                    text::Style {
+                                        color: Some(theme.palette().text.scale_alpha(0.7)),
+                                    }
                                 }
                             ).width(Length::Fill),
                         ].width(Length::Fill),
@@ -311,10 +319,14 @@ pub fn airpods_view<'a>(
         })
         .style(
             |theme: &Theme| {
-                let mut style = container::Style::default();
-                style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                let mut border = Border::default();
-                border.color = theme.palette().primary.scale_alpha(0.5);
+                let mut style = container::Style {
+                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                    ..Default::default()
+                };
+                let border = Border {
+                    color: theme.palette().primary.scale_alpha(0.5),
+                    ..Default::default()
+                };
                 style.border = border.rounded(16);
                 style
             }
@@ -329,9 +341,9 @@ pub fn airpods_view<'a>(
                 text("Off Listening Mode").size(16),
                 text("When this is on, AirPods listening modes will include an Off option. Loud sound levels are not reduced when listening mode is set to Off.").size(12).style(
                     |theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text.scale_alpha(0.7));
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text.scale_alpha(0.7)),
+                        }
                     }
                 ).width(Length::Fill)
             ].width(Length::Fill),
@@ -364,10 +376,14 @@ pub fn airpods_view<'a>(
             })
             .style(
                 |theme: &Theme| {
-                    let mut style = container::Style::default();
-                    style.background = Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                    let mut border = Border::default();
-                    border.color = theme.palette().primary.scale_alpha(0.5);
+                    let mut style = container::Style {
+                        background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                        ..Default::default()
+                    };
+                    let border = Border {
+                        color: theme.palette().primary.scale_alpha(0.5),
+                        ..Default::default()
+                    };
                     style.border = border.rounded(16);
                     style
                 }
@@ -387,9 +403,9 @@ pub fn airpods_view<'a>(
                 text("Hi-Res Microphone").size(16),
                 text("Captures the AirPods' high-quality AAC-ELD microphone stream and exposes it as an 'AirPodsHiRes' input.").size(12).style(
                     |theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text.scale_alpha(0.7));
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text.scale_alpha(0.7)),
+                        }
                     }
                 ).width(Length::Fill)
             ].width(Length::Fill),
@@ -422,11 +438,14 @@ pub fn airpods_view<'a>(
                 right: 18.0,
             })
             .style(|theme: &Theme| {
-                let mut style = container::Style::default();
-                style.background =
-                    Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                let mut border = Border::default();
-                border.color = theme.palette().primary.scale_alpha(0.5);
+                let mut style = container::Style {
+                    background: Some(Background::Color(theme.palette().primary.scale_alpha(0.1))),
+                    ..Default::default()
+                };
+                let border = Border {
+                    color: theme.palette().primary.scale_alpha(0.5),
+                    ..Default::default()
+                };
                 style.border = border.rounded(16);
                 style
             })
@@ -438,52 +457,54 @@ pub fn airpods_view<'a>(
             let info_rows = column![
                 row![
                     text("Model Number").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     text(airpods_info.model_number.clone()).size(16)
                 ],
                 row![
                     text("Manufacturer").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     text(airpods_info.manufacturer.clone()).size(16)
                 ],
                 row![
                     text("Serial Number").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     button(text(airpods_info.serial_number.clone()).size(16))
                         .style(|theme: &Theme, _status| {
-                            let mut style = Style::default();
-                            style.text_color = theme.palette().text;
-                            style.background = Some(Background::Color(Color::TRANSPARENT));
-                            style
+                            Style {
+                                text_color: theme.palette().text,
+                                background: Some(Background::Color(Color::TRANSPARENT)),
+                                ..Default::default()
+                            }
                         })
                         .padding(0)
                         .on_press(Message::CopyToClipboard(airpods_info.serial_number.clone()))
                 ],
                 row![
                     text("Left Serial Number").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     button(text(airpods_info.left_serial_number.clone()).size(16))
                         .style(|theme: &Theme, _status| {
-                            let mut style = Style::default();
-                            style.text_color = theme.palette().text;
-                            style.background = Some(Background::Color(Color::TRANSPARENT));
-                            style
+                            Style {
+                                text_color: theme.palette().text,
+                                background: Some(Background::Color(Color::TRANSPARENT)),
+                                ..Default::default()
+                            }
                         })
                         .padding(0)
                         .on_press(Message::CopyToClipboard(
@@ -492,17 +513,18 @@ pub fn airpods_view<'a>(
                 ],
                 row![
                     text("Right Serial Number").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     button(text(airpods_info.right_serial_number.clone()).size(16))
                         .style(|theme: &Theme, _status| {
-                            let mut style = Style::default();
-                            style.text_color = theme.palette().text;
-                            style.background = Some(Background::Color(Color::TRANSPARENT));
-                            style
+                            Style {
+                                text_color: theme.palette().text,
+                                background: Some(Background::Color(Color::TRANSPARENT)),
+                                ..Default::default()
+                            }
                         })
                         .padding(0)
                         .on_press(Message::CopyToClipboard(
@@ -511,27 +533,27 @@ pub fn airpods_view<'a>(
                 ],
                 row![
                     text("Version 1").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     text(airpods_info.version1.clone()).size(16)
                 ],
                 row![
                     text("Version 2").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     text(airpods_info.version2.clone()).size(16)
                 ],
                 row![
                     text("Version 3").size(16).style(|theme: &Theme| {
-                        let mut style = text::Style::default();
-                        style.color = Some(theme.palette().text);
-                        style
+                        text::Style {
+                            color: Some(theme.palette().text),
+                        }
                     }),
                     Space::new().width(Length::Fill),
                     text(airpods_info.version3.clone()).size(16)
@@ -542,9 +564,9 @@ pub fn airpods_view<'a>(
 
             information_col = column![
                 container(text("Device Information").size(18).style(|theme: &Theme| {
-                    let mut style = text::Style::default();
-                    style.color = Some(theme.palette().primary);
-                    style
+                    text::Style {
+                        color: Some(theme.palette().primary),
+                    }
                 }))
                 .padding(Padding {
                     top: 5.0,
@@ -560,11 +582,16 @@ pub fn airpods_view<'a>(
                         right: 10.0,
                     })
                     .style(|theme: &Theme| {
-                        let mut style = container::Style::default();
-                        style.background =
-                            Some(Background::Color(theme.palette().primary.scale_alpha(0.1)));
-                        let mut border = Border::default();
-                        border.color = theme.palette().primary.scale_alpha(0.5);
+                        let mut style = container::Style {
+                            background: Some(Background::Color(
+                                theme.palette().primary.scale_alpha(0.1),
+                            )),
+                            ..Default::default()
+                        };
+                        let border = Border {
+                            color: theme.palette().primary.scale_alpha(0.5),
+                            ..Default::default()
+                        };
                         style.border = border.rounded(16);
                         style
                     })
@@ -626,19 +653,18 @@ fn level_meter<'a>(level: f32, app: Option<String>) -> iced::widget::Container<'
     )
     .width(Length::Fill)
     .height(Length::from(10))
-    .style(|theme: &Theme| {
-        let mut s = container::Style::default();
-        s.background = Some(Background::Color(theme.palette().text.scale_alpha(0.12)));
-        s.border = Border::default().rounded(4);
-        s
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().text.scale_alpha(0.12))),
+        border: Border::default().rounded(4),
+        ..Default::default()
     });
 
     container(
         column![
             text(label).size(12).style(|theme: &Theme| {
-                let mut style = text::Style::default();
-                style.color = Some(theme.palette().text.scale_alpha(0.7));
-                style
+                text::Style {
+                    color: Some(theme.palette().text.scale_alpha(0.7)),
+                }
             }),
             bar,
         ]

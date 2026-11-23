@@ -409,11 +409,11 @@ impl AirPodsDevice {
                         if stem_control {
                             let controller = mc_clone.lock().await;
                             match press_type {
-                                StemPressType::DoublePress => {
+                                StemPressType::Double => {
                                     info!("Double press detected, skipping to next track");
                                     controller.next_track().await;
                                 }
-                                StemPressType::TriplePress => {
+                                StemPressType::Triple => {
                                     info!("Triple press detected, going to previous track");
                                     controller.previous_track().await;
                                 }

@@ -214,19 +214,19 @@ impl ProximityKeyType {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StemPressType {
-    SinglePress = 0x05,
-    DoublePress = 0x06,
-    TriplePress = 0x07,
-    LongPress = 0x08,
+    Single = 0x05,
+    Double = 0x06,
+    Triple = 0x07,
+    Long = 0x08,
 }
 
 impl StemPressType {
     fn from_u8(value: u8) -> Option<Self> {
         match value {
-            0x05 => Some(Self::SinglePress),
-            0x06 => Some(Self::DoublePress),
-            0x07 => Some(Self::TriplePress),
-            0x08 => Some(Self::LongPress),
+            0x05 => Some(Self::Single),
+            0x06 => Some(Self::Double),
+            0x07 => Some(Self::Triple),
+            0x08 => Some(Self::Long),
             _ => None,
         }
     }
@@ -1028,7 +1028,8 @@ impl AACPManager {
                         info.le_keys = old.le_keys.clone();
                     }
                     device_data.name = info.name.clone();
-                    device_data.information = Some(DeviceInformation::AirPods(info.clone()));
+                    device_data.information =
+                        Some(DeviceInformation::AirPods(Box::new(info.clone())));
                 }
                 let json = serde_json::to_string(&state.devices);
                 // Don't hold the AACP state lock across disk I/O: every incoming
@@ -1099,7 +1100,7 @@ impl AACPManager {
                         // never succeed and auto-connect never fires.
                         if !matches!(device_data.information, Some(DeviceInformation::AirPods(_))) {
                             device_data.information =
-                                Some(DeviceInformation::AirPods(AirPodsInformation {
+                                Some(DeviceInformation::AirPods(Box::new(AirPodsInformation {
                                     name: device_data.name.clone(),
                                     model_number: String::new(),
                                     manufacturer: String::new(),
@@ -1115,7 +1116,7 @@ impl AACPManager {
                                         irk: String::new(),
                                         enc_key: String::new(),
                                     },
-                                }));
+                                })));
                         }
                         if let Some(DeviceInformation::AirPods(info)) =
                             device_data.information.as_mut()
@@ -1299,9 +1300,10 @@ impl AACPManager {
         key_types: Vec<ProximityKeyType>,
     ) -> Result<()> {
         let opcode = [opcodes::PROXIMITY_KEYS_REQ, 0x00];
-        let mut data = Vec::with_capacity(2);
-        data.push(key_types.iter().fold(0u8, |acc, kt| acc | (*kt as u8)));
-        data.push(0x00);
+        let data = vec![
+            key_types.iter().fold(0u8, |acc, kt| acc | (*kt as u8)),
+            0x00,
+        ];
         let packet = [opcode.as_slice(), data.as_slice()].concat();
         self.send_data_packet(&packet).await
     }

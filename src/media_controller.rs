@@ -179,7 +179,7 @@ impl MediaController {
                 _ = tokio::time::sleep(Duration::from_millis(500)) => {}
             }
 
-            let is_playing = tokio::task::spawn_blocking(|| Self::check_if_playing())
+            let is_playing = tokio::task::spawn_blocking(Self::check_if_playing)
                 .await
                 .unwrap_or(false);
             // An app opening the hi-res mic (e.g. joining a voice call) is the
@@ -1110,10 +1110,10 @@ impl MediaController {
                     conn.with_proxy(service, "/org/mpris/MediaPlayer2", Duration::from_secs(5));
                 if let Ok(status) =
                     proxy.get::<String>("org.mpris.MediaPlayer2.Player", "PlaybackStatus")
+                    && status == "Playing"
+                    && playing.is_none()
                 {
-                    if status == "Playing" && playing.is_none() {
-                        playing = Some(service);
-                    }
+                    playing = Some(service);
                 }
                 if fallback.is_none() {
                     fallback = Some(service);
@@ -1453,8 +1453,8 @@ fn get_card_info_list_sync() -> Vec<OwnedCardInfo> {
     // mid-request (pipewire-pulse restart) the callback still holds a reference,
     // and with panic = "abort" the unwrap would kill the whole app.
     drop(op);
-    let result = cards.borrow().clone();
-    result
+
+    cards.borrow().clone()
 }
 
 fn get_sink_volume_percent_by_name_sync(sink_name: &str) -> Option<u32> {

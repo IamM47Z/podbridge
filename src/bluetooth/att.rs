@@ -261,10 +261,10 @@ impl ATTManager {
         let mut rx = self.response_rx.lock().await;
         match tokio::time::timeout(Duration::from_millis(RESPONSE_TIMEOUT), rx.recv()).await {
             Ok(Some(Ok(resp))) => Ok(resp),
-            Ok(Some(Err(code))) => Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("ATT error 0x{:02x}", code),
-            ))),
+            Ok(Some(Err(code))) => Err(Error::from(std::io::Error::other(format!(
+                "ATT error 0x{:02x}",
+                code
+            )))),
             Ok(None) => Err(Error::from(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "Response channel closed",

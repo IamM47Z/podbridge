@@ -309,7 +309,9 @@ fn start_feed(addr: &str) -> Option<std::process::Child> {
                 pcm.clear();
                 pcm.extend(
                     buf[..n - n % 2]
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .map(|b| i16::from_le_bytes([b[0], b[1]])),
                 );
                 if output.write(&pcm).is_err() {
@@ -390,7 +392,7 @@ async fn monitor_loop(
             _ = tokio::time::sleep(POLL_INTERVAL) => {}
         }
         polls = polls.wrapping_add(1);
-        if polls % WIREPLUMBER_RECHECK_POLLS == 0 {
+        if polls.is_multiple_of(WIREPLUMBER_RECHECK_POLLS) {
             blocking(output::hide_wireplumber_mic).await;
         }
 
@@ -1170,7 +1172,7 @@ fn spawn_decode_thread(
                 };
                 status.set_level(env);
 
-                if frames > 0 && frames % 400 == 0 {
+                if frames > 0 && frames.is_multiple_of(400) {
                     let secs = frames as f64 * ELD_FRAME_SAMPLES as f64 / ELD_SAMPLE_RATE as f64;
                     info!(
                         "[audio] {} frames ({:.0}s), {} errors, level {:.2}",

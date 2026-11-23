@@ -161,7 +161,6 @@ impl ksni::Tray for MyTray {
                         ..Default::default()
                     })
                     .collect(),
-                ..Default::default()
             }
             .into(),
             MenuItem::Separator,

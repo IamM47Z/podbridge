@@ -103,8 +103,7 @@ pub fn headset_source(addr: &str) -> Option<String> {
     });
     wait_op(&mut mainloop, &op);
     drop(op);
-    let result = found.borrow().clone();
-    result
+    found.borrow().clone()
 }
 
 /// Wake `wake` whenever a recording stream appears, goes or changes, so a new
@@ -382,17 +381,16 @@ pub fn source_consumer(name: &str) -> SourceUse {
         let op = introspect.get_source_output_info_list({
             let app = app.clone();
             move |result| {
-                if let ListResult::Item(item) = result {
-                    if item.source == idx
-                        && item.sample_spec.rate >= MIN_RECORDER_RATE
-                        && app.borrow().is_none()
-                    {
-                        let label = item
-                            .proplist
-                            .get_str("application.name")
-                            .or_else(|| item.name.as_ref().map(|n| n.to_string()));
-                        app.replace(label);
-                    }
+                if let ListResult::Item(item) = result
+                    && item.source == idx
+                    && item.sample_spec.rate >= MIN_RECORDER_RATE
+                    && app.borrow().is_none()
+                {
+                    let label = item
+                        .proplist
+                        .get_str("application.name")
+                        .or_else(|| item.name.as_ref().map(|n| n.to_string()));
+                    app.replace(label);
                 }
             }
         });
@@ -569,8 +567,7 @@ fn our_modules() -> Vec<(u32, String)> {
     wait_op(&mut mainloop, &op);
     drop(op);
     mainloop.quit(Retval(0));
-    let result = found.borrow().clone();
-    result
+    found.borrow().clone()
 }
 
 fn unload_stale_modules() {
@@ -635,8 +632,7 @@ fn list_recorders() -> Vec<(Recorder, u32)> {
     wait_op(&mut mainloop, &op);
     drop(op);
     mainloop.quit(Retval(0));
-    let result = found.borrow().clone();
-    result
+    found.borrow().clone()
 }
 
 /// Real recorders on a source (level meters excluded).
@@ -669,8 +665,7 @@ pub fn default_source() -> Option<String> {
     wait_op(&mut mainloop, &op);
     drop(op);
     mainloop.quit(Retval(0));
-    let result = current.borrow().clone();
-    result
+    current.borrow().clone()
 }
 
 /// Make `name` the default source. Streams that follow the default are moved
@@ -721,8 +716,7 @@ pub fn fallback_source(exclude: &str) -> Option<String> {
     wait_op(&mut mainloop, &op);
     drop(op);
     mainloop.quit(Retval(0));
-    let result = best.borrow().clone().map(|(_, name)| name);
-    result
+    best.borrow().clone().map(|(_, name)| name)
 }
 
 /// Move recorders that still exist (same index *and* app) and aren't on
@@ -766,7 +760,7 @@ pub fn move_recorders(recorders: &[Recorder], target: &str) -> Vec<Recorder> {
 }
 
 fn load_module(name: &str, args: &str) -> Option<u32> {
-    let (mut mainloop, mut context) = connect()?;
+    let (mut mainloop, context) = connect()?;
     let idx: Rc<Cell<u32>> = Rc::new(Cell::new(u32::MAX));
     let mut introspect = context.introspect();
     let op = introspect.load_module(name, args, {
@@ -786,7 +780,7 @@ fn unload_module(index: u32) {
     if index == u32::MAX {
         return;
     }
-    if let Some((mut mainloop, mut context)) = connect() {
+    if let Some((mut mainloop, context)) = connect() {
         let mut introspect = context.introspect();
         let op = introspect.unload_module(index, |_| {});
         wait_op(&mut mainloop, &op);

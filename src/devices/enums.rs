@@ -23,7 +23,7 @@ impl Display for DeviceType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data")]
 pub enum DeviceInformation {
-    AirPods(AirPodsInformation),
+    AirPods(Box<AirPodsInformation>),
     Nothing(NothingInformation),
 }
 

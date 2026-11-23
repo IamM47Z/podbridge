@@ -166,10 +166,8 @@ pub fn get_app_settings_path() -> PathBuf {
     }
 
     // migrate if needed
-    if old_path.exists() && !new_path.exists() {
-        if std::fs::copy(&old_path, &new_path).is_ok() {
-            let _ = std::fs::remove_file(&old_path);
-        }
+    if old_path.exists() && !new_path.exists() && std::fs::copy(&old_path, &new_path).is_ok() {
+        let _ = std::fs::remove_file(&old_path);
     }
 
     new_path

@@ -128,8 +128,8 @@ impl EldDecoder {
                 f if f == ff::AVSampleFormat::AV_SAMPLE_FMT_FLTP as c_int => {
                     // native aac: planar float
                     for i in 0..ns {
-                        for c in 0..nch {
-                            let plane = data[c] as *const f32;
+                        for &channel in data.iter().take(nch) {
+                            let plane = channel as *const f32;
                             out.push(f_to_s16(*plane.add(i)));
                         }
                     }
@@ -142,8 +142,8 @@ impl EldDecoder {
                 }
                 f if f == ff::AVSampleFormat::AV_SAMPLE_FMT_S16P as c_int => {
                     for i in 0..ns {
-                        for c in 0..nch {
-                            let plane = data[c] as *const i16;
+                        for &channel in data.iter().take(nch) {
+                            let plane = channel as *const i16;
                             out.push(*plane.add(i));
                         }
                     }
