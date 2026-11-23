@@ -57,7 +57,7 @@ pub fn start_ui(
 }
 
 /// The basename of the desktop file; Wayland compositors match windows by it.
-const APP_ID: &str = "io.github.iamm47z.podbridge";
+pub(crate) const APP_ID: &str = "io.github.iamm47z.podbridge";
 
 pub struct App {
     window: Option<window::Id>,

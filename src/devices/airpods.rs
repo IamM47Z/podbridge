@@ -1,5 +1,6 @@
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::bluetooth::aacp::{AACPEvent, AACPManager, AirPodsLEKeys, ProximityKeyType};
+use crate::devices::low_battery::{LowBatteryAlerts, alert_body, notify};
 use crate::media_controller::MediaController;
 use crate::ui::messages::BluetoothUIMessage;
 use crate::ui::tray::MyTray;
@@ -301,7 +302,16 @@ struct EventLoop {
 impl EventLoop {
     async fn run(self, mut rx: tokio::sync::mpsc::UnboundedReceiver<AACPEvent>) {
         let mut connect_routing = ConnectRouting::default();
+        let mut battery_alerts = LowBatteryAlerts::default();
         while let Some(event) = rx.recv().await {
+            if let AACPEvent::BatteryInfo(battery) = &event {
+                let crossed = battery_alerts.check(battery);
+                if !crossed.is_empty() {
+                    let body = alert_body(&crossed);
+                    info!("Low battery: {}", body);
+                    tokio::task::spawn_blocking(move || notify(&body));
+                }
+            }
             let connect_check = match &event {
                 AACPEvent::EarDetection(old, _) if old.is_empty() => {
                     connect_routing.note_first_ear()
