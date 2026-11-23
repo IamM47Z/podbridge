@@ -14,13 +14,13 @@ repos:
         name: cargo clippy
         entry: cargo clippy --all-targets --locked -- -D warnings
         language: system
-        types: [rust]
+        files: '(\.rs|Cargo\.(toml|lock))$'
         pass_filenames: false
         stages: [pre-commit]
       - id: cargo-test
         name: cargo test
         entry: cargo test --locked
         language: system
-        types: [rust]
+        files: '(\.rs|Cargo\.(toml|lock))$'
         pass_filenames: false
         stages: [pre-push]

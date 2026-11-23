@@ -32,8 +32,9 @@ files, and `clang`.
 cargo build --release
 ```
 
-CI rejects any rustc or clippy warning. Run `prek install` once to get the same
-checks locally: fmt and clippy on commit, tests on push.
+CI rejects any rustc or clippy warning. Install [prek](https://github.com/j178/prek)
+and run `prek install` once to get the same checks locally: fmt and clippy on
+commit, tests on push.
 
 ## Credits
 
