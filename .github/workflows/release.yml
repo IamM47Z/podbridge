@@ -51,7 +51,7 @@ jobs:
 
           stage="$APP-$GITHUB_REF_NAME-x86_64-linux"
           mkdir "$stage"
-          cp "target/release/$APP" LICENSE NOTICE README.md \
+          cp "target/release/$APP" LICENSE NOTICE README.md assets/font/*.txt \
             "assets/$APP_ID.desktop" assets/icon.png "$stage/"
           tar -czf "dist/$stage.tar.gz" "$stage"
 
@@ -66,6 +66,7 @@ jobs:
           cp assets/icon.png "$APP_ID.png"
           ./linuxdeploy --appdir AppDir --executable "target/release/$APP" \
             --desktop-file "assets/$APP_ID.desktop" --icon-file "$APP_ID.png"
+          install -Dm644 -t "AppDir/usr/share/licenses/$APP/" LICENSE NOTICE assets/font/*.txt
           ARCH=x86_64 ./appimagetool --runtime-file runtime AppDir "dist/$APP-$GITHUB_REF_NAME-x86_64.AppImage"
 
           (cd dist && sha256sum -- * > SHA256SUMS)

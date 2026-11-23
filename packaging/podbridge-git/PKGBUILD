@@ -44,5 +44,5 @@ package() {
   install -Dm644 "assets/$id.desktop" "$pkgdir/usr/share/applications/$id.desktop"
   install -Dm644 assets/icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$id.png"
   install -Dm644 assets/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$id.svg"
-  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname/" NOTICE assets/font/Inter-OFL.txt assets/font/DejaVu-LICENSE.txt
 }

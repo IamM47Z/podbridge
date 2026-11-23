@@ -44,6 +44,7 @@ modules:
       - install -Dm644 assets/icon.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.iamm47z.podbridge.svg
       - install -Dm644 assets/io.github.iamm47z.podbridge.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 flatpak/io.github.iamm47z.podbridge.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      - install -Dm644 -t ${FLATPAK_DEST}/share/licenses/${FLATPAK_ID}/ LICENSE NOTICE assets/font/Inter-OFL.txt assets/font/DejaVu-LICENSE.txt
     sources:
       # The vendored source tarball from `just tarball local`.
       - type: archive

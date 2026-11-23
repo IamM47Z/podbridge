@@ -14,8 +14,11 @@ Their authorship is recorded in the LibrePods history.
 Bundled fonts keep their own licenses:
 - assets/font/Inter-Regular.ttf: Inter 4.1, (c) The Inter Project Authors,
   SIL Open Font License 1.1, see assets/font/Inter-OFL.txt.
-- assets/font/DejaVuSans.ttf: DejaVu Sans, (c) Bitstream and the DejaVu
-  authors, see assets/font/DejaVu-LICENSE.txt.
+- assets/font/DejaVuSans.ttf: DejaVu Sans. Bitstream Vera glyphs (c)
+  Bitstream, Arev glyphs (c) Tavmjong Bah, DejaVu changes in the public
+  domain. See assets/font/DejaVu-LICENSE.txt.
+
+Packages install these license files next to this NOTICE.
 
 podbridge is distributed under the same license, the GNU Affero General
 Public License v3.0. See LICENSE.

@@ -7,7 +7,7 @@ pr	head	verdict	reason
 586	8c6bb40f31a5f1697f8bbe993786c0ceaa597fce	closed	closed upstream
 597	1eb5330fc61706c15965c7d21ed7c975f3e833b2	skipped	popup animation from 180 PNG frames; bypasses the in-ear takeover guard
 617	e082fe19da1fe861ed5eabc0671ad1fe1c8cb765	skipped	AirPods Max feature; forces L2CAP security and notify-send for every model
-634	9e953a7c8277738b36be75e1084a0386ba2ef0dd	partial	settings-folder fix redone by hand, keeping the migration check
+634	9e953a7c8277738b36be75e1084a0386ba2ef0dd	partial	settings-folder fix redone by hand; its migration check was later dropped with all LibrePods migration
 641	e9470e2b44d8d705c1021e9528586f5bce08b8d5	skipped	only helps headless mode
 655	99b0e580a93f2a26647f89816895ca1e5f70a3ec	skipped	hi-res mic v1, broke A2DP for a tester; superseded by #888/#926
 665	d7454b477b773a5aaccfe37a4c44999f1dea3933	merged	in linux/rust-maintained
