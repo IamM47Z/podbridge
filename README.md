@@ -32,6 +32,9 @@ files, and `clang`.
 cargo build --release
 ```
 
+CI rejects any rustc or clippy warning. Run `prek install` once to get the same
+checks locally: fmt and clippy on commit, tests on push.
+
 ## Credits
 
 podbridge started as the Linux app of
