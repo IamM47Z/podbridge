@@ -85,6 +85,7 @@ pub struct App {
     a2dp_reset: bool,
     audio_off_when_not_wearing: bool,
     pause_when_one_removed: bool,
+    hand_back_when_idle: bool,
     /// Bumped on each adaptive strength slider move; only the last move sends.
     adaptive_strength_generation: u64,
 }
@@ -130,6 +131,7 @@ pub enum Message {
     A2dpResetChanged(bool),
     AudioOffWhenNotWearingChanged(bool),
     PauseWhenOneRemovedChanged(bool),
+    HandBackWhenIdleChanged(bool),
     HiResMicAgcChanged(bool),
     HiResMicPauseConvoChanged(bool),
     MicLevelTick,
@@ -240,6 +242,7 @@ impl App {
                 a2dp_reset,
                 audio_off_when_not_wearing,
                 pause_when_one_removed,
+                hand_back_when_idle: app_settings.hand_back_when_idle,
             },
             Task::batch(vec![open_task, wait_task]),
         )
@@ -259,6 +262,7 @@ impl App {
             s.a2dp_reset = self.a2dp_reset;
             s.audio_off_when_not_wearing = self.audio_off_when_not_wearing;
             s.pause_when_one_removed = self.pause_when_one_removed;
+            s.hand_back_when_idle = self.hand_back_when_idle;
         });
     }
 
@@ -329,6 +333,9 @@ impl App {
             }
             Message::PauseWhenOneRemovedChanged(on) => {
                 self.change_setting(|app| app.pause_when_one_removed = on)
+            }
+            Message::HandBackWhenIdleChanged(on) => {
+                self.change_setting(|app| app.hand_back_when_idle = on)
             }
             Message::HiResMicAgcChanged(on) => self.change_setting(|app| app.hires_mic_agc = on),
             Message::HiResMicPauseConvoChanged(on) => {

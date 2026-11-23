@@ -1,6 +1,7 @@
 mod audio;
 mod bluetooth;
 mod devices;
+mod hand_back;
 mod media_controller;
 mod ui;
 mod utils;

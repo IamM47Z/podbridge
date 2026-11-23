@@ -44,6 +44,13 @@ impl App {
             ),
             Space::new().height(Length::from(20)),
             setting_toggle(
+                "Hand AirPods back when done",
+                "After this computer took the AirPods from your iPhone or another device, give them back once nothing here has played or used the mic for 30 seconds. Never during a call.",
+                self.hand_back_when_idle,
+                Message::HandBackWhenIdleChanged,
+            ),
+            Space::new().height(Length::from(20)),
+            setting_toggle(
                 "Reset A2DP transport",
                 "Briefly pauses and resumes the AirPods audio after the hi-res mic turns off. Without it, playback continues in only one earbud until the mic is used again or the AirPods reconnect.",
                 self.a2dp_reset,

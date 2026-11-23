@@ -2,6 +2,7 @@ use crate::audio::card::{self, CardRef};
 use crate::audio::output::{connect, wait_op};
 use crate::bluetooth::aacp::AACPManager;
 use crate::bluetooth::aacp::EarDetectionStatus;
+use crate::hand_back::HandBack;
 use dbus::blocking::Connection;
 use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use libpulse_binding::callbacks::ListResult;
@@ -76,6 +77,9 @@ struct MediaControllerState {
     /// We paused the local players (ownership lost): their own resume
     /// afterwards is not the user starting playback.
     i_paused_the_media: bool,
+    /// Gives the AirPods back to the device they were taken from once this
+    /// computer stops using them.
+    hand_back: HandBack,
 }
 
 impl MediaControllerState {
@@ -96,6 +100,7 @@ impl MediaControllerState {
             last_takeover: None,
             connection_ended: false,
             i_paused_the_media: false,
+            hand_back: HandBack::default(),
             conv_original_volume: None,
             conv_conversation_started: false,
             playback_listener_running: false,
@@ -198,8 +203,9 @@ impl MediaController {
             let other_was_active = std::mem::replace(&mut state.other_was_active, other_active);
             if other_active {
                 // Another device has the AirPods now: the next start here must
-                // claim them again.
+                // claim them again, and there is nothing to hand back.
                 state.last_takeover = None;
+                state.hand_back.released();
             }
             drop(state);
 
@@ -208,6 +214,9 @@ impl MediaController {
                 debug!("Recorded initial playback state ({is_playing}); not a transition");
                 continue;
             }
+
+            self.hand_back_when_idle(&aacp_manager, &control_tx, is_playing || mic_active)
+                .await;
 
             // Losing ownership pauses local players and drops the audio
             // profile. Players tend to resume on their own once the profile
@@ -258,13 +267,14 @@ impl MediaController {
         // packets takes the same lock (holding it here would deadlock when
         // another device is listed), and holding it through A2DP activation
         // would stall all AirPods packet handling.
-        let (worn, connected_devices) = {
+        let (worn, connected_devices, audio_source_mac) = {
             let aacp_state = aacp_manager.state.lock().await;
             (
                 aacp_state
                     .ear_detection_status
                     .contains(&EarDetectionStatus::InEar),
                 aacp_state.connected_devices.clone(),
+                aacp_state.audio_source.as_ref().map(|s| s.mac.clone()),
             )
         };
         if !worn {
@@ -289,13 +299,19 @@ impl MediaController {
             return;
         }
         info!("{}, taking ownership and activating a2dp", reason);
+        // Only a device that was actually using the AirPods gets them back.
+        let local_mac = self.state.lock().await.local_mac.clone();
+        if aacp_manager.other_device_using_audio(&local_mac).await
+            && let Some(from) = audio_source_mac
+        {
+            self.state.lock().await.hand_back.took_over_from(from);
+        }
         let _ = control_tx.send((
             crate::bluetooth::aacp::ControlCommandIdentifiers::OwnsConnection,
             vec![0x01],
         ));
         self.activate_a2dp_profile().await;
 
-        let local_mac = self.state.lock().await.local_mac.clone();
         for device in connected_devices {
             if device.mac == local_mac {
                 continue;
@@ -319,6 +335,54 @@ impl MediaController {
         }
         self.state.lock().await.last_takeover = Some(std::time::Instant::now());
         debug!("completed takeover process");
+    }
+
+    /// Give the AirPods back to the device they were taken from once nothing
+    /// here has used them for HAND_BACK_AFTER (see hand_back.rs). Releasing
+    /// ownership and the audio profile is the same release podbridge does
+    /// when the other device asks for them.
+    async fn hand_back_when_idle(
+        &self,
+        aacp_manager: &AACPManager,
+        control_tx: &tokio::sync::mpsc::UnboundedSender<(
+            crate::bluetooth::aacp::ControlCommandIdentifiers,
+            Vec<u8>,
+        )>,
+        in_use_here: bool,
+    ) {
+        let connected: Vec<String> = aacp_manager
+            .state
+            .lock()
+            .await
+            .connected_devices
+            .iter()
+            .map(|d| d.mac.clone())
+            .collect();
+        let target = {
+            let mut state = self.state.lock().await;
+            let still_connected = |mac: &str| connected.iter().any(|m| m.eq_ignore_ascii_case(mac));
+            let from_connected = state.hand_back.pending().is_some_and(still_connected);
+            state
+                .hand_back
+                .tick(std::time::Instant::now(), in_use_here, from_connected)
+        };
+        let Some(target) = target else {
+            return;
+        };
+        if !crate::utils::AppSettings::load().hand_back_when_idle {
+            debug!("Hand-back to {} is turned off", target);
+            return;
+        }
+        info!(
+            "Nothing here has used the AirPods for a while; handing them back to {}",
+            target
+        );
+        let _ = control_tx.send((
+            crate::bluetooth::aacp::ControlCommandIdentifiers::OwnsConnection,
+            vec![0x00],
+        ));
+        self.deactivate_a2dp_profile().await;
+        self.state.lock().await.last_takeover = None;
     }
 
     fn check_if_playing() -> bool {

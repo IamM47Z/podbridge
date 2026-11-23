@@ -256,6 +256,9 @@ pub struct AppSettings {
     pub pause_when_one_removed: bool,
     /// Press-and-hold listening modes per AirPods MAC, re-sent on each connect.
     pub press_and_hold_modes: HashMap<String, u8>,
+    /// After taking the AirPods from another device, give them back once
+    /// nothing here has used them for a while (see hand_back.rs).
+    pub hand_back_when_idle: bool,
     /// Conversation awareness was switched off for a mic capture and couldn't
     /// be switched back on before the AirPods disconnected.
     pub convo_restore_pending: bool,
@@ -280,6 +283,7 @@ impl Default for AppSettings {
             audio_off_when_not_wearing: true,
             pause_when_one_removed: true,
             press_and_hold_modes: HashMap::new(),
+            hand_back_when_idle: true,
             convo_restore_pending: false,
             conv_volume_restore: None,
         }
