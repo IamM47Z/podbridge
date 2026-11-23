@@ -593,7 +593,9 @@ impl MediaController {
         }
     }
 
-    async fn pause(&self) {
+    /// Pause every playing player and remember them for resume(). Returns
+    /// whether anything was paused.
+    async fn pause(&self) -> bool {
         debug!("Pausing playback");
 
         let paused_services = tokio::task::spawn_blocking(|| {
@@ -638,8 +640,10 @@ impl MediaController {
             let mut state = self.state.lock().await;
             state.paused_by_app_services = paused_services;
             state.is_playing = false;
+            true
         } else {
             info!("No playing media players found to pause");
+            false
         }
     }
 
@@ -739,9 +743,19 @@ impl MediaController {
         }
     }
 
+    /// Pause what plays, or resume what this paused. A plain PlayPause would go
+    /// to whichever player D-Bus lists first once nothing plays, which can
+    /// start a different player than the one just paused.
     pub async fn play_pause(&self) {
-        info!("Toggling play/pause");
-        self.mpris_command("PlayPause").await;
+        if self.pause().await {
+            return;
+        }
+        if self.state.lock().await.paused_by_app_services.is_empty() {
+            info!("Nothing paused by podbridge; sending PlayPause");
+            self.mpris_command("PlayPause").await;
+        } else {
+            self.resume().await;
+        }
     }
 
     pub async fn next_track(&self) {

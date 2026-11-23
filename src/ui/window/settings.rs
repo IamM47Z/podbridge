@@ -102,7 +102,7 @@ impl App {
             heading("Controls"),
             setting_toggle(
                 "Stem press control",
-                "podbridge handles double and triple presses with the actions below. Takes effect on the next connect. Disable if your environment handles AirPods AVRCP commands natively.",
+                "podbridge handles double and triple presses with the actions below. Turning this on or off takes effect on the next connect. A changed action applies at once. Disable if your environment handles AirPods AVRCP commands natively.",
                 self.stem_control,
                 Message::StemControlChanged,
             )
