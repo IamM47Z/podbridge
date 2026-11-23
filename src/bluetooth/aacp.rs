@@ -432,7 +432,6 @@ pub struct AACPManager {
     /// listener, command/subscriber loops) watch this and exit when it drops, so
     /// they don't pile up across reconnects.
     connected: Arc<watch::Sender<bool>>,
-    /// Incremented on every ear-detection report.
     /// The user changed conversation awareness while a capture had it
     /// overridden; the capture then must not restore its saved value.
     convo_user_changed: Arc<AtomicBool>,

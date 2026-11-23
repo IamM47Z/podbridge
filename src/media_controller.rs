@@ -1453,7 +1453,6 @@ fn get_card_info_list_sync() -> Vec<OwnedCardInfo> {
     // mid-request (pipewire-pulse restart) the callback still holds a reference,
     // and with panic = "abort" the unwrap would kill the whole app.
     drop(op);
-
     cards.borrow().clone()
 }
 
