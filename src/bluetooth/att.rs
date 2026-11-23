@@ -404,6 +404,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn empty_pdu_is_ignored() {
+        assert_eq!(classify_pdu(&[]), Pdu::Ignored);
+    }
+
+    #[test]
+    fn notification_without_full_handle_is_ignored() {
+        assert_eq!(classify_pdu(&[0x1B]), Pdu::Ignored);
+        assert_eq!(classify_pdu(&[0x1B, 0x18]), Pdu::Ignored);
+    }
+
+    #[test]
+    fn notification_may_carry_an_empty_value() {
+        assert_eq!(
+            classify_pdu(&[0x1B, 0x05, 0x80]),
+            Pdu::Notification {
+                handle: 0x8005,
+                value: vec![]
+            }
+        );
+    }
+
+    #[test]
+    fn error_response_without_code_reads_zero() {
+        assert_eq!(
+            classify_pdu(&[0x01, 0x12, 0x02, 0x00]),
+            Pdu::Error { code: 0 }
+        );
+    }
+
+    #[test]
+    fn any_other_opcode_is_a_response() {
+        assert_eq!(classify_pdu(&[0x0B]), Pdu::Response(vec![]));
+        // Write Request echoes and unknown opcodes take the same path.
+        assert_eq!(
+            classify_pdu(&[0x12, 0x02, 0x00, 0x01]),
+            Pdu::Response(vec![0x02, 0x00, 0x01])
+        );
+        assert_eq!(classify_pdu(&[0xFF, 0xAA]), Pdu::Response(vec![0xAA]));
+    }
+
     #[tokio::test]
     async fn drain_stale_responses_empties_channel() {
         let manager = ATTManager::new();
