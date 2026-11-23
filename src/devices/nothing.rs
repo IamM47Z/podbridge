@@ -1,6 +1,6 @@
 use crate::bluetooth::att::{ATTHandles, ATTManager};
 use crate::devices::enums::{DeviceData, DeviceInformation, DeviceType};
-use crate::utils::get_devices_path;
+use crate::utils::update_devices;
 use bluer::Address;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
@@ -30,28 +30,6 @@ impl NothingDevice {
             .register_listener(ATTHandles::NothingEverythingRead, tx)
             .await;
 
-        let devices: HashMap<String, DeviceData> = std::fs::read_to_string(get_devices_path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-        let device_key = mac_address.to_string();
-        let information = if let Some(device_data) = devices.get(&device_key) {
-            let info = device_data.information.clone();
-            if let Some(DeviceInformation::Nothing(ref nothing_info)) = info {
-                nothing_info.clone()
-            } else {
-                NothingInformation {
-                    serial_number: String::new(),
-                    firmware_version: String::new(),
-                }
-            }
-        } else {
-            NothingInformation {
-                serial_number: String::new(),
-                firmware_version: String::new(),
-            }
-        };
-
         // Request version information
         att_manager
             .write(
@@ -75,87 +53,25 @@ impl NothingDevice {
             .await
             .unwrap_or_else(|e| log::error!("Failed to write to Nothing device: {}", e));
 
-        let information_l = information.clone();
+        let device_key = mac_address.to_string();
         tokio::spawn(async move {
             while let Some(data) = rx.recv().await {
-                if data.starts_with(&[0x55, 0x20, 0x01, 0x42, 0x40]) {
-                    let firmware_version = String::from_utf8_lossy(&data[8..]).to_string();
-                    info!(
-                        "Received firmware version from Nothing device {}: {}",
-                        mac_address, firmware_version
-                    );
-                    let new_information = NothingInformation {
-                        serial_number: information_l.serial_number.clone(),
-                        firmware_version: firmware_version.clone(),
-                    };
-                    let mut new_devices = devices.clone();
-                    new_devices.insert(
-                        device_key.clone(),
-                        DeviceData {
-                            name: devices
-                                .get(&device_key)
-                                .map(|d| d.name.clone())
-                                .unwrap_or("Nothing Device".to_string()),
-                            type_: devices
-                                .get(&device_key)
-                                .map(|d| d.type_.clone())
-                                .unwrap_or(DeviceType::Nothing),
-                            information: Some(DeviceInformation::Nothing(new_information)),
-                        },
-                    );
-                    save_devices(&new_devices);
-                } else if data.starts_with(&[0x55, 0x20, 0x01, 0x06, 0x40]) {
-                    let serial_number_start_position = data
-                        .iter()
-                        .position(|&b| b == "S".as_bytes()[0])
-                        .unwrap_or(8);
-                    let serial_number_end = data
-                        .iter()
-                        .skip(serial_number_start_position)
-                        .position(|&b| b == 0x0A)
-                        .map(|pos| pos + serial_number_start_position)
-                        .unwrap_or(data.len());
-                    if data.get(serial_number_start_position + 1) == Some(&"H".as_bytes()[0]) {
-                        let serial_number = String::from_utf8_lossy(
-                            &data[serial_number_start_position..serial_number_end],
-                        )
-                        .to_string();
-                        info!(
-                            "Received serial number from Nothing device {}: {}",
-                            mac_address, serial_number
-                        );
-                        let new_information = NothingInformation {
-                            serial_number: serial_number.clone(),
-                            firmware_version: information_l.firmware_version.clone(),
-                        };
-                        let mut new_devices = devices.clone();
-                        new_devices.insert(
-                            device_key.clone(),
-                            DeviceData {
-                                name: devices
-                                    .get(&device_key)
-                                    .map(|d| d.name.clone())
-                                    .unwrap_or("Nothing Device".to_string()),
-                                type_: devices
-                                    .get(&device_key)
-                                    .map(|d| d.type_.clone())
-                                    .unwrap_or(DeviceType::Nothing),
-                                information: Some(DeviceInformation::Nothing(new_information)),
-                            },
-                        );
-                        save_devices(&new_devices);
-                    } else {
-                        debug!(
-                            "Serial number format unexpected from Nothing device {}: {:?}",
-                            mac_address, data
-                        );
-                    }
-                }
-
                 debug!(
                     "Received data from (Nothing) device {}, data: {:?}",
                     mac_address, data
                 );
+                let Some(reply) = parse_reply(&data) else {
+                    continue;
+                };
+                info!("Nothing device {}: {:?}", mac_address, reply);
+                let key = device_key.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    update_devices(|devices| {
+                        apply_reply(devices, &key, reply);
+                        true
+                    })
+                })
+                .await;
             }
         });
 
@@ -163,13 +79,128 @@ impl NothingDevice {
     }
 }
 
-fn save_devices(devices: &HashMap<String, DeviceData>) {
-    match serde_json::to_string(devices) {
-        Ok(json) => {
-            if let Err(e) = crate::utils::write_atomic(&get_devices_path(), json.as_bytes()) {
-                log::error!("Failed to write devices file: {}", e);
-            }
+const FIRMWARE_REPLY: [u8; 5] = [0x55, 0x20, 0x01, 0x42, 0x40];
+const SERIAL_REPLY: [u8; 5] = [0x55, 0x20, 0x01, 0x06, 0x40];
+/// Both replies carry their payload after an 8-byte header.
+const REPLY_HEADER: usize = 8;
+
+#[derive(Debug)]
+enum Reply {
+    Firmware(String),
+    Serial(String),
+}
+
+fn parse_reply(data: &[u8]) -> Option<Reply> {
+    if data.starts_with(&FIRMWARE_REPLY) {
+        let version = data.get(REPLY_HEADER..)?;
+        return Some(Reply::Firmware(
+            String::from_utf8_lossy(version).into_owned(),
+        ));
+    }
+    if data.starts_with(&SERIAL_REPLY) {
+        // The serial starts with "SH" and ends at a newline.
+        let start = data.iter().position(|&b| b == b'S').unwrap_or(REPLY_HEADER);
+        if data.get(start + 1) != Some(&b'H') {
+            debug!(
+                "Serial number format unexpected from Nothing device: {:?}",
+                data
+            );
+            return None;
         }
-        Err(e) => log::error!("Failed to serialize devices file: {}", e),
+        let end = data[start..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(data.len(), |pos| pos + start);
+        return Some(Reply::Serial(
+            String::from_utf8_lossy(&data[start..end]).into_owned(),
+        ));
+    }
+    None
+}
+
+/// Store a reply in this device's entry, keeping every other field.
+fn apply_reply(devices: &mut HashMap<String, DeviceData>, key: &str, reply: Reply) {
+    let device = devices
+        .entry(key.to_string())
+        .or_insert_with(|| DeviceData {
+            name: "Nothing Device".to_string(),
+            type_: DeviceType::Nothing,
+            information: None,
+        });
+    let mut info = match device.information.take() {
+        Some(DeviceInformation::Nothing(info)) => info,
+        _ => NothingInformation {
+            serial_number: String::new(),
+            firmware_version: String::new(),
+        },
+    };
+    match reply {
+        Reply::Firmware(v) => info.firmware_version = v,
+        Reply::Serial(s) => info.serial_number = s,
+    }
+    device.information = Some(DeviceInformation::Nothing(info));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FW: [u8; 5] = [0x55, 0x20, 0x01, 0x42, 0x40];
+    const SN: [u8; 5] = [0x55, 0x20, 0x01, 0x06, 0x40];
+
+    #[test]
+    fn short_firmware_replies_are_ignored() {
+        for len in 5..8 {
+            let mut data = FW.to_vec();
+            data.resize(len, 0);
+            assert!(parse_reply(&data).is_none(), "len {len}");
+        }
+    }
+
+    #[test]
+    fn firmware_reply_is_read_after_its_header() {
+        let mut data = FW.to_vec();
+        data.extend([0, 0, 0]);
+        data.extend(b"1.0.2");
+        assert!(matches!(parse_reply(&data), Some(Reply::Firmware(v)) if v == "1.0.2"));
+    }
+
+    #[test]
+    fn serial_reply_runs_to_newline() {
+        let mut data = SN.to_vec();
+        data.extend([0, 0, 0]);
+        data.extend(b"SH123\nrest");
+        assert!(matches!(parse_reply(&data), Some(Reply::Serial(s)) if s == "SH123"));
+        let mut bad = SN.to_vec();
+        bad.extend(b"XY");
+        assert!(parse_reply(&bad).is_none());
+    }
+
+    #[test]
+    fn replies_update_only_their_own_field_of_the_current_file() {
+        let mut devices = HashMap::new();
+        devices.insert(
+            "other".to_string(),
+            DeviceData {
+                name: "Pods".into(),
+                type_: DeviceType::AirPods,
+                information: None,
+            },
+        );
+        apply_reply(&mut devices, "aa", Reply::Firmware("1.0".into()));
+        // Someone renamed the device between the two replies.
+        devices.get_mut("aa").unwrap().name = "Ear (2)".into();
+        apply_reply(&mut devices, "aa", Reply::Serial("SH1".into()));
+
+        let d = &devices["aa"];
+        assert_eq!(d.name, "Ear (2)");
+        let Some(DeviceInformation::Nothing(info)) = &d.information else {
+            panic!("no Nothing information");
+        };
+        assert_eq!(
+            (info.firmware_version.as_str(), info.serial_number.as_str()),
+            ("1.0", "SH1")
+        );
+        assert!(devices.contains_key("other"));
     }
 }
