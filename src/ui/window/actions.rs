@@ -93,7 +93,7 @@ impl App {
         let Some(mask) = state.press_and_hold_modes else {
             return Task::none();
         };
-        let new_mask = press_and_hold::toggle(mask, mode);
+        let new_mask = press_and_hold::toggle(mask, mode, state.allow_off_mode);
         if new_mask == mask {
             return Task::none();
         }

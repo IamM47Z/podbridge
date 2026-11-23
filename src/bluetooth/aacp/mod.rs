@@ -229,31 +229,37 @@ impl AACPManager {
             warn!("[hires] failed to set conversation detection: {}", e);
             return false;
         }
-        // AirPods don't echo this back, so record it in our own status list
-        // (the source of truth for conversation_detection_enabled) and push it
-        // to the UI ourselves.
+        // AirPods don't echo this back, so record it ourselves: the status
+        // list is the source of truth for conversation_detection_enabled.
+        self.record_control_status(ControlCommandIdentifiers::ConversationDetectConfig, value)
+            .await;
+        true
+    }
+
+    /// Record a control value the AirPods do not echo back: store it in the
+    /// status list and push it to the event channel, as a report would.
+    pub async fn record_control_status(&self, identifier: ControlCommandIdentifiers, value: u8) {
         let mut state = self.state.lock().await;
         if let Some(existing) = state
             .control_command_status_list
             .iter_mut()
-            .find(|s| s.identifier == ControlCommandIdentifiers::ConversationDetectConfig)
+            .find(|s| s.identifier == identifier)
         {
             existing.value = vec![value];
         } else {
             state
                 .control_command_status_list
                 .push(ControlCommandStatus {
-                    identifier: ControlCommandIdentifiers::ConversationDetectConfig,
+                    identifier,
                     value: vec![value],
                 });
         }
         if let Some(ref tx) = state.event_tx {
             let _ = tx.send(AACPEvent::ControlCommand(ControlCommandStatus {
-                identifier: ControlCommandIdentifiers::ConversationDetectConfig,
+                identifier,
                 value: vec![value],
             }));
         }
-        true
     }
 
     pub fn mic_level(&self) -> f32 {

@@ -193,11 +193,18 @@ async fn restore_press_and_hold_modes(aacp_manager: &AACPManager, mac: &str) {
         return;
     };
     info!("Restoring press-and-hold modes {:#04x}", mask);
-    if let Err(e) = aacp_manager
+    match aacp_manager
         .send_control_command(ControlCommandIdentifiers::ListeningModeConfigs, &[mask])
         .await
     {
-        error!("Failed to restore press-and-hold modes: {}", e);
+        // Whether the AirPods report 0x1A back after a write is unverified;
+        // record it so the UI shows what was sent either way.
+        Ok(()) => {
+            aacp_manager
+                .record_control_status(ControlCommandIdentifiers::ListeningModeConfigs, mask)
+                .await
+        }
+        Err(e) => error!("Failed to restore press-and-hold modes: {}", e),
     }
 }
 

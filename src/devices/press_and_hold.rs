@@ -17,9 +17,11 @@ pub const MODES: [(u8, &str); 4] = [
 
 /// Flip one mode. The cycle needs at least two modes, so turning one off
 /// that would leave fewer is refused and the mask comes back unchanged.
-pub fn toggle(mask: u8, mode: u8) -> u8 {
+/// Off counts only while it is allowed: hidden, it cannot be one of the two.
+pub fn toggle(mask: u8, mode: u8, allow_off: bool) -> u8 {
     let toggled = mask ^ mode;
-    if (toggled & 0x0F).count_ones() < 2 {
+    let shown = if allow_off { 0x0F } else { 0x0F & !OFF };
+    if (toggled & shown).count_ones() < 2 {
         mask
     } else {
         toggled
@@ -33,21 +35,30 @@ mod tests {
     #[test]
     fn modes_turn_on_and_off() {
         let mask = NOISE_CANCELLATION | TRANSPARENCY;
-        assert_eq!(toggle(mask, ADAPTIVE), mask | ADAPTIVE);
-        assert_eq!(toggle(mask | ADAPTIVE, ADAPTIVE), mask);
+        assert_eq!(toggle(mask, ADAPTIVE, true), mask | ADAPTIVE);
+        assert_eq!(toggle(mask | ADAPTIVE, ADAPTIVE, true), mask);
     }
 
     #[test]
     fn fewer_than_two_modes_is_refused() {
         let mask = NOISE_CANCELLATION | TRANSPARENCY;
-        assert_eq!(toggle(mask, TRANSPARENCY), mask);
+        assert_eq!(toggle(mask, TRANSPARENCY, true), mask);
+    }
+
+    #[test]
+    fn hidden_off_does_not_count_toward_two() {
+        // Off + ANC + Adaptive with Off hidden: only ANC and Adaptive show,
+        // so unchecking ANC would leave one visible mode.
+        let mask = OFF | NOISE_CANCELLATION | ADAPTIVE;
+        assert_eq!(toggle(mask, NOISE_CANCELLATION, false), mask);
+        assert_eq!(toggle(mask, NOISE_CANCELLATION, true), OFF | ADAPTIVE);
     }
 
     #[test]
     fn values_match_the_protocol_notes() {
         // "Turns on Adaptive from O and ANC": 0x03 becomes 0x0B.
-        assert_eq!(toggle(OFF | NOISE_CANCELLATION, ADAPTIVE), 0x0B);
+        assert_eq!(toggle(OFF | NOISE_CANCELLATION, ADAPTIVE, true), 0x0B);
         // "Turns off Transparency from O and Adaptive": 0x0D becomes 0x09.
-        assert_eq!(toggle(0x0D, TRANSPARENCY), 0x09);
+        assert_eq!(toggle(0x0D, TRANSPARENCY, true), 0x09);
     }
 }
