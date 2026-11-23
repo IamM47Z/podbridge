@@ -4,8 +4,9 @@
 //!
 //! Apple documents only one rule for automatic switching: sound should not
 //! switch during a conversation (a call or video conference). An active mic
-//! here counts as one. Apple does not document the timing, nor whether the
-//! iPhone resumes on its own; the delay below is a guess the live tests set.
+//! or any unpaused stream here blocks the hand-back. Apple does not document
+//! the timing, nor whether the iPhone resumes on its own; the delay below is a
+//! guess the live tests set.
 
 use std::time::{Duration, Instant};
 

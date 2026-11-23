@@ -358,6 +358,14 @@ impl MediaController {
             .iter()
             .map(|d| d.mac.clone())
             .collect();
+        let pending = self.state.lock().await.hand_back.pending().is_some();
+        // Calls and other audio that are not MPRIS players count too. Only
+        // asked while a hand-back waits: it opens a PulseAudio connection.
+        let in_use_here = in_use_here
+            || (pending
+                && tokio::task::spawn_blocking(card::any_playing)
+                    .await
+                    .unwrap_or(true));
         let target = {
             let mut state = self.state.lock().await;
             let still_connected = |mac: &str| connected.iter().any(|m| m.eq_ignore_ascii_case(mac));
