@@ -34,7 +34,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: cargo-${{ runner.os }}-deny-warnings-${{ hashFiles('Cargo.lock') }}
 
       - name: Format
         run: cargo fmt --check
