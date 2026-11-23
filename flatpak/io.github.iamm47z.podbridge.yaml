@@ -41,6 +41,7 @@ modules:
       - cargo build --release --frozen --offline --verbose
       - install -Dm755 target/release/podbridge ${FLATPAK_DEST}/bin/podbridge
       - install -Dm644 assets/icon.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/io.github.iamm47z.podbridge.png
+      - install -Dm644 assets/icon.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.iamm47z.podbridge.svg
       - install -Dm644 assets/io.github.iamm47z.podbridge.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
       - install -Dm644 flatpak/io.github.iamm47z.podbridge.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
     sources:

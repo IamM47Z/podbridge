@@ -43,5 +43,6 @@ package() {
   install -Dm755 target/release/podbridge "$pkgdir/usr/bin/podbridge"
   install -Dm644 "assets/$id.desktop" "$pkgdir/usr/share/applications/$id.desktop"
   install -Dm644 assets/icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$id.png"
+  install -Dm644 assets/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$id.svg"
   install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
 }

@@ -1651,7 +1651,7 @@ impl App {
 fn main_window_settings() -> window::Settings {
     window::Settings {
         min_size: Some(Size::new(400.0, 300.0)),
-        icon: window::icon::from_file("../../assets/icon.png").ok(),
+        icon: window::icon::from_file_data(include_bytes!("../../assets/icon.png"), None).ok(),
         ..Default::default()
     }
 }
