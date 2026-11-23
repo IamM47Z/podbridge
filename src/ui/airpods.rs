@@ -5,8 +5,8 @@ use iced::Alignment::End;
 use iced::border::Radius;
 use iced::widget::rule::FillMode;
 use iced::widget::{
-    Column, Container, Row, Space, column, combo_box, container, row, rule, text, text_input,
-    toggler,
+    Column, Container, Row, Space, column, combo_box, container, row, rule, slider, text,
+    text_input, toggler,
 };
 use iced::{Background, Border, Center, Color, Length, Padding, Theme};
 use log::error;
@@ -15,7 +15,9 @@ use std::sync::Arc;
 use std::thread;
 use tokio::runtime::Runtime;
 // use crate::bluetooth::att::ATTManager;
-use crate::devices::enums::{AirPodsState, DeviceData, DeviceInformation, DeviceState};
+use crate::devices::enums::{
+    AirPodsNoiseControlMode, AirPodsState, DeviceData, DeviceInformation, DeviceState,
+};
 use crate::ui::window::Message;
 
 pub fn airpods_view<'a>(
@@ -104,52 +106,100 @@ fn listening_mode_section<'a>(
     aacp_manager: &Arc<AACPManager>,
 ) -> Container<'a, Message> {
     container(
-        row![
-            text("Listening Mode").size(16).style(style::text_normal),
-            Space::new().width(Length::Fill),
-            {
-                let state_clone = state.clone();
-                let mac = mac.to_string();
-                // this combo_box doesn't go really well with the design, but I am not writing my own dropdown menu for this
-                combo_box(
-                    &state.noise_control_state,
-                    "Select Listening Mode",
-                    Some(&state.noise_control_mode.clone()),
-                    {
-                        let aacp_manager = aacp_manager.clone();
-                        move |selected_mode| {
+        column![
+            row![
+                text("Listening Mode").size(16).style(style::text_normal),
+                Space::new().width(Length::Fill),
+                {
+                    let state_clone = state.clone();
+                    let mac = mac.to_string();
+                    // this combo_box doesn't go really well with the design, but I am not writing my own dropdown menu for this
+                    combo_box(
+                        &state.noise_control_state,
+                        "Select Listening Mode",
+                        Some(&state.noise_control_mode.clone()),
+                        {
                             let aacp_manager = aacp_manager.clone();
-                            let selected_mode_c = selected_mode.clone();
-                            run_async_in_thread(async move {
-                                aacp_manager
-                                    .send_control_command(
-                                        ControlCommandIdentifiers::ListeningMode,
-                                        &[selected_mode_c.to_byte()],
-                                    )
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        log::error!(
-                                            "Failed to send Noise Control Mode command: {}",
-                                            e
+                            move |selected_mode| {
+                                let aacp_manager = aacp_manager.clone();
+                                let selected_mode_c = selected_mode.clone();
+                                run_async_in_thread(async move {
+                                    aacp_manager
+                                        .send_control_command(
+                                            ControlCommandIdentifiers::ListeningMode,
+                                            &[selected_mode_c.to_byte()],
                                         )
-                                    });
-                            });
-                            let mut state = state_clone.clone();
-                            state.noise_control_mode = selected_mode.clone();
-                            Message::StateChanged(mac.to_string(), DeviceState::AirPods(state))
-                        }
-                    },
-                )
-                .width(Length::from(200))
-                .input_style(style::combo_input)
-                .padding(Padding::from([5.0, 10.0]))
-                .menu_style(style::combo_menu)
-            }
+                                        .await
+                                        .unwrap_or_else(|e| {
+                                            log::error!(
+                                                "Failed to send Noise Control Mode command: {}",
+                                                e
+                                            )
+                                        });
+                                });
+                                let mut state = state_clone.clone();
+                                state.noise_control_mode = selected_mode.clone();
+                                Message::StateChanged(mac.to_string(), DeviceState::AirPods(state))
+                            }
+                        },
+                    )
+                    .width(Length::from(200))
+                    .input_style(style::combo_input)
+                    .padding(Padding::from([5.0, 10.0]))
+                    .menu_style(style::combo_menu)
+                }
+            ]
+            .align_y(Center)
         ]
-        .align_y(Center),
+        .extend(adaptive_strength_row(mac, state)),
     )
     .padding(Padding::from([5.0, 18.0]))
     .style(style::card)
+}
+
+/// Adaptive mode's strength slider, like Apple's "Customize Adaptive Audio".
+/// Shown only in Adaptive mode on AirPods that report the setting. Dragging
+/// only moves the slider; releasing it sends the level once.
+fn adaptive_strength_row<'a>(
+    mac: &str,
+    state: &'a AirPodsState,
+) -> Option<iced::Element<'a, Message>> {
+    if !matches!(state.noise_control_mode, AirPodsNoiseControlMode::Adaptive) {
+        return None;
+    }
+    let level = state.adaptive_strength?;
+    let on_change = {
+        let mac = mac.to_string();
+        let state = state.clone();
+        move |value: f32| {
+            let mut state = state.clone();
+            state.adaptive_strength = Some(level_from_slider(value));
+            Message::StateChanged(mac.clone(), DeviceState::AirPods(state))
+        }
+    };
+    Some(
+        row![
+            text("Less noise").size(14).style(style::text_muted),
+            slider(0.0..=100.0, slider_from_level(level), on_change)
+                .step(1.0_f32)
+                .on_release(Message::AdaptiveStrengthReleased(mac.to_string(), level)),
+            text("More noise").size(14).style(style::text_muted),
+        ]
+        .spacing(12)
+        .align_y(Center)
+        .padding(Padding::from([8.0, 0.0]))
+        .into(),
+    )
+}
+
+/// The slider runs from "Less noise" (0) to "More noise" (100); the AirPods'
+/// level runs the other way.
+fn slider_from_level(level: u8) -> f32 {
+    100.0 - f32::from(level.min(100))
+}
+
+fn level_from_slider(value: f32) -> u8 {
+    (100.0 - value.clamp(0.0, 100.0)).round() as u8
 }
 
 fn audio_section<'a>(
@@ -427,4 +477,26 @@ where
         let rt = Runtime::new().unwrap();
         rt.block_on(fut);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slider_runs_from_less_noise_to_more_noise() {
+        // Level 100 filters the most noise: the "Less noise" end, slider 0.
+        assert_eq!(slider_from_level(100), 0.0);
+        assert_eq!(slider_from_level(0), 100.0);
+        assert_eq!(level_from_slider(0.0), 100);
+        assert_eq!(level_from_slider(100.0), 0);
+        assert_eq!(level_from_slider(slider_from_level(37)), 37);
+    }
+
+    #[test]
+    fn out_of_range_levels_are_clamped() {
+        assert_eq!(slider_from_level(200), 0.0);
+        assert_eq!(level_from_slider(-5.0), 100);
+        assert_eq!(level_from_slider(150.0), 0);
+    }
 }

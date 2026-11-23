@@ -57,6 +57,9 @@ pub struct AirPodsState {
     pub conversation_awareness_enabled: bool,
     pub personalized_volume_enabled: bool,
     pub allow_off_mode: bool,
+    /// Adaptive mode's noise filtering, 0 to 100 (100 filters the most), as
+    /// the AirPods report it; None on models without it.
+    pub adaptive_strength: Option<u8>,
     /// Local capture state of the proprietary hi-res microphone (UI-driven).
     pub hires_mic_enabled: bool,
     pub battery: Vec<BatteryInfo>,

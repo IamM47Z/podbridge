@@ -113,6 +113,8 @@ pub enum Message {
     ConfirmAddDevice,
     CancelAddDevice,
     StateChanged(String, DeviceState),
+    /// The adaptive strength slider was let go: send its level (mac, level).
+    AdaptiveStrengthReleased(String, u8),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
     StemControlChanged(bool),
     A2dpResetChanged(bool),
@@ -290,6 +292,9 @@ impl App {
             Message::ConfirmAddDevice => self.confirm_add_device(),
             Message::CancelAddDevice => self.cancel_add_device(),
             Message::StateChanged(mac, state) => self.state_changed(mac, state),
+            Message::AdaptiveStrengthReleased(mac, level) => {
+                self.send_adaptive_strength(&mac, level)
+            }
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),
             Message::TrayTextModeChanged(on) => self.change_setting(|app| app.tray_text_mode = on),
             Message::StemControlChanged(on) => self.change_setting(|app| app.stem_control = on),

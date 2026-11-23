@@ -167,6 +167,10 @@ impl App {
                 ControlCommandIdentifiers::AdaptiveVolumeConfig,
             ),
             allow_off_mode,
+            adaptive_strength: statuses
+                .iter()
+                .find(|status| status.identifier == ControlCommandIdentifiers::AutoAncStrength)
+                .and_then(|status| status.value.first().copied()),
             hires_mic_enabled: self.hires_mic_enabled,
         }
     }
@@ -215,6 +219,11 @@ impl App {
                     let is_enabled = parse_toggle(&status.value, "Adaptive Volume Config");
                     if let Some(state) = self.airpods_state_mut(mac) {
                         state.personalized_volume_enabled = is_enabled;
+                    }
+                }
+                ControlCommandIdentifiers::AutoAncStrength => {
+                    if let Some(state) = self.airpods_state_mut(mac) {
+                        state.adaptive_strength = status.value.first().copied();
                     }
                 }
                 ControlCommandIdentifiers::AllowOffOption => {

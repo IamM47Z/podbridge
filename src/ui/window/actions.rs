@@ -2,10 +2,13 @@
 
 use super::bluetooth::{device_type_from_file, noise_control_modes};
 use super::{App, Message, Tab};
+use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
+use crate::ui::messages::BluetoothUIMessage;
 use bluer::Address;
 use iced::Task;
 use iced::widget::combo_box;
+use log::error;
 use std::collections::HashMap;
 
 impl App {
@@ -47,6 +50,28 @@ impl App {
             self.selected_tab = Tab::Device(addr.to_string());
         }
         Task::none()
+    }
+
+    pub(super) fn send_adaptive_strength(&self, mac: &str, level: u8) -> Task<Message> {
+        let Some(aacp) = self
+            .device_managers
+            .blocking_read()
+            .get(mac)
+            .and_then(|m| m.get_aacp())
+        else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                if let Err(e) = aacp
+                    .send_control_command(ControlCommandIdentifiers::AutoAncStrength, &[level])
+                    .await
+                {
+                    error!("Failed to send adaptive strength: {}", e);
+                }
+            },
+            |_| Message::Bluetooth(BluetoothUIMessage::NoOp),
+        )
     }
 
     pub(super) fn state_changed(&mut self, mac: String, state: DeviceState) -> Task<Message> {
