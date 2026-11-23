@@ -9,6 +9,7 @@ use std::path::PathBuf;
 pub const APP_DIR: &str = "podbridge";
 
 /// `$<xdg_var>/podbridge`, or `$HOME/<home_fallback>/podbridge` when unset.
+/// Under `cfg(test)`, a per-process folder under the temp dir instead.
 pub fn app_dir(xdg_var: &str, home_fallback: &str) -> PathBuf {
     #[cfg(test)]
     {

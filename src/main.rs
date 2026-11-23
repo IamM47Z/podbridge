@@ -269,7 +269,7 @@ struct Backend {
 impl Backend {
     fn send_ui(&self, message: BluetoothUIMessage) {
         if let Err(e) = self.ui_tx.send(message) {
-            warn!("Failed to send DeviceConnected UI message: {:?}", e);
+            warn!("Failed to send UI message: {:?}", e);
         }
     }
 
@@ -369,7 +369,7 @@ impl ConnectionWatcher {
                 .ui_tx
                 .send(BluetoothUIMessage::DeviceDisconnected(addr_str.clone()))
             {
-                warn!("Failed to send DeviceConnected UI message: {:?}", e);
+                warn!("Failed to send UI message: {:?}", e);
             }
             return;
         }
