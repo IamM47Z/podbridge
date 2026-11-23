@@ -14,14 +14,9 @@ impl std::fmt::Display for InvalidMac {
 }
 
 /// The MAC's bytes, last first, as the smart-routing packets carry them.
-// shortcut: like the code it replaced, this takes any number of colon-separated
-// hex bytes; parsing into bluer::Address would also enforce six.
 fn reversed_mac(mac: &str) -> Result<Vec<u8>, InvalidMac> {
-    let mut bytes = mac
-        .split(':')
-        .map(|s| u8::from_str_radix(s, 16))
-        .collect::<Result<Vec<u8>, _>>()
-        .map_err(|_| InvalidMac(mac.to_string()))?;
+    let address: bluer::Address = mac.parse().map_err(|_| InvalidMac(mac.to_string()))?;
+    let mut bytes = address.0.to_vec();
     bytes.reverse();
     Ok(bytes)
 }
@@ -39,8 +34,13 @@ pub fn build_proximity_keys_request(key_types: &[ProximityKeyType]) -> Vec<u8> {
     ]
 }
 
+/// A name longer than the one-byte length allows is cut at a char boundary.
 pub fn build_rename(name: &str) -> Vec<u8> {
-    let name_bytes = name.as_bytes();
+    let mut end = name.len().min(u8::MAX as usize);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let name_bytes = &name.as_bytes()[..end];
     let size = name_bytes.len();
     let mut packet = Vec::with_capacity(6 + size);
     packet.push(opcodes::RENAME);
@@ -241,6 +241,30 @@ mod tests {
     #[test]
     fn rename() {
         assert_eq!(build_rename("Pods"), hex("1a00010400506f6473"));
+    }
+
+    #[test]
+    fn rename_cuts_long_names_at_a_char_boundary() {
+        // 128 two-byte chars: 256 bytes, one past what the length byte holds.
+        let packet = build_rename(&"é".repeat(128));
+        assert_eq!(packet[3], 254);
+        assert_eq!(packet.len(), 5 + 254);
+        assert!(std::str::from_utf8(&packet[5..]).is_ok());
+    }
+
+    #[test]
+    fn reversed_mac_needs_six_octets() {
+        assert_eq!(
+            reversed_mac(TARGET_MAC).unwrap(),
+            [0x66, 0x55, 0x44, 0x33, 0x22, 0x11]
+        );
+        for bad in [
+            "11:22:33:44:55",
+            "11:22:33:44:55:66:77",
+            "11:22:33:44:55:zz",
+        ] {
+            assert!(reversed_mac(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
