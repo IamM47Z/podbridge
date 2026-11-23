@@ -335,7 +335,7 @@ impl EventLoop {
                 if !crossed.is_empty() {
                     let body = alert_body(&crossed);
                     info!("Low battery: {}", body);
-                    tokio::task::spawn_blocking(move || notify(&body));
+                    tokio::task::spawn_blocking(move || notify("AirPods battery low", &body));
                 }
             }
             let connect_check = match &event {

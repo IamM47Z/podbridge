@@ -1,5 +1,6 @@
-use crate::bluetooth::aacp::BatteryStatus;
+use crate::bluetooth::aacp::{BatteryComponent, BatteryInfo, BatteryStatus};
 use crate::devices::enums::{DeviceData, DeviceInformation, DeviceType};
+use crate::devices::low_battery::notify;
 use crate::ui::tray::MyTray;
 use crate::utils::{ah, get_devices_path, get_preferences_path};
 use aes::Aes128;
@@ -13,6 +14,7 @@ use log::{debug, info};
 use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 fn decrypt(key: &[u8; 16], data: &[u8; 16]) -> [u8; 16] {
@@ -44,6 +46,141 @@ fn verify_rpa(addr: &str, irk: &[u8; 16]) -> bool {
     hash == computed_hash
 }
 
+/// The case lid from a proximity pairing message (Apple manufacturer data
+/// without the company ID): whether it is open, and its open counter. None
+/// for other messages, and while this bud is out of the case: only a bud in
+/// the case sees the lid (librepods' Linux client reads it the same way).
+fn lid_state(apple_data: &[u8]) -> Option<(bool, u8)> {
+    if apple_data.len() < 9 || apple_data[0] != 0x07 || apple_data[2] == 0x00 {
+        return None;
+    }
+    if apple_data[5] & 0x40 == 0 {
+        return None;
+    }
+    let lid = apple_data[8];
+    Some((lid & 0x08 == 0, lid & 0x07))
+}
+
+/// One bud's view of the lid, to notice each opening once.
+#[derive(Debug, Default)]
+struct LidWatch {
+    last: Option<(bool, u8)>,
+}
+
+impl LidWatch {
+    /// True when this report opens the lid. A new open counter is a new
+    /// opening too, since the closed state may never have been advertised.
+    fn opened(&mut self, lid: Option<(bool, u8)>) -> bool {
+        let Some((open, count)) = lid else {
+            return false;
+        };
+        let new = open
+            && self
+                .last
+                .is_none_or(|(was_open, was)| !was_open || was != count);
+        self.last = lid;
+        new
+    }
+}
+
+// shortcut: a guess; it only has to cover both buds advertising one opening.
+// The live tests may show a shorter one is enough.
+const LID_NOTICE_COOLDOWN: Duration = Duration::from_secs(10);
+
+/// The last lid-open notification per AirPods, shared by their buds.
+#[derive(Debug, Default)]
+struct LidNotices {
+    last: HashMap<String, Instant>,
+}
+
+impl LidNotices {
+    fn due(&mut self, airpods_mac: &str, now: Instant) -> bool {
+        if let Some(last) = self.last.get(airpods_mac)
+            && now.duration_since(*last) < LID_NOTICE_COOLDOWN
+        {
+            return false;
+        }
+        self.last.insert(airpods_mac.to_string(), now);
+        true
+    }
+}
+
+/// Left, right and case battery from the decrypted advert payload. The
+/// primary bud (status bit 5) comes first; 0xFF means not reported.
+fn batteries(status: u8, decrypted: &[u8; 16]) -> [BatteryInfo; 3] {
+    let primary_left = status & 0x20 != 0;
+    let (left, right) = if primary_left { (1, 2) } else { (2, 1) };
+    let info = |component, byte: u8| match byte {
+        0xFF => BatteryInfo {
+            component,
+            level: 0,
+            status: BatteryStatus::Disconnected,
+        },
+        _ => BatteryInfo {
+            component,
+            level: byte & 0x7F,
+            status: if byte & 0x80 != 0 {
+                BatteryStatus::Charging
+            } else {
+                BatteryStatus::NotCharging
+            },
+        },
+    };
+    [
+        info(BatteryComponent::Left, decrypted[left]),
+        info(BatteryComponent::Right, decrypted[right]),
+        info(BatteryComponent::Case, decrypted[3]),
+    ]
+}
+
+/// The lid-open notification text: each reported battery.
+fn lid_open_body(batteries: &[BatteryInfo]) -> String {
+    batteries
+        .iter()
+        .filter(|b| b.status != BatteryStatus::Disconnected)
+        .map(|b| {
+            let name = match b.component {
+                BatteryComponent::Left => "Left",
+                BatteryComponent::Right => "Right",
+                BatteryComponent::Case => "Case",
+                BatteryComponent::Headphone => "AirPods",
+            };
+            let charging = if b.status == BatteryStatus::Charging {
+                " (charging)"
+            } else {
+                ""
+            };
+            format!("{name}: {}%{charging}", b.level)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Notify when this advert opens the case lid, once per opening across
+/// both buds.
+fn notice_lid_open(
+    name: &str,
+    airpods_mac: &str,
+    apple_data: &[u8],
+    decrypted: &[u8; 16],
+    lid: &mut LidWatch,
+    notices: &std::sync::Mutex<LidNotices>,
+) {
+    if !lid.opened(lid_state(apple_data)) {
+        return;
+    }
+    let Ok(mut notices) = notices.lock() else {
+        return;
+    };
+    if !notices.due(airpods_mac, Instant::now()) {
+        return;
+    }
+    let body = lid_open_body(&batteries(apple_data[5], decrypted));
+    info!("{} case opened: {}", name, body);
+    let summary = name.to_string();
+    tokio::task::spawn_blocking(move || notify(&summary, &body));
+}
+
 // None on a failed read or parse, e.g. mid-write, so the caller keeps its copy.
 fn load_devices() -> Option<HashMap<String, DeviceData>> {
     let json = std::fs::read_to_string(get_devices_path()).ok()?;
@@ -68,6 +205,7 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
     let mut failed_macs: HashSet<Address> = HashSet::new();
     let mut listening_macs: HashSet<Address> = HashSet::new();
     let connecting_macs = Arc::new(Mutex::new(HashSet::<Address>::new()));
+    let lid_notices = Arc::new(std::sync::Mutex::new(LidNotices::default()));
 
     let pattern = Pattern {
         data_type: 0xFF, // Manufacturer specific data
@@ -159,9 +297,30 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
             }
             listening_macs.insert(addr);
             let mut events = dev.events().await?;
+            // The advert that announced this address raises no PropertyChanged.
+            let first_data = dev.manufacturer_data().await.ok().flatten();
+            let name = all_devices
+                .get(&matched_airpods_mac)
+                .map_or_else(|| "AirPods".to_string(), |d| d.name.clone());
             let tray_handle_clone = tray_handle.clone();
             let connecting_macs_clone = Arc::clone(&connecting_macs);
+            let lid_notices = Arc::clone(&lid_notices);
             tokio::spawn(async move {
+                let mut lid = LidWatch::default();
+                if let Some(enc_key) = &matched_enc_key
+                    && let Some(apple_data) = first_data.as_ref().and_then(|d| d.get(&76))
+                    && apple_data.len() > 20
+                    && let Some(last_16) = apple_data.last_chunk::<16>()
+                {
+                    notice_lid_open(
+                        &name,
+                        &matched_airpods_mac,
+                        apple_data,
+                        &decrypt(enc_key, last_16),
+                        &mut lid,
+                        &lid_notices,
+                    );
+                }
                 while let Some(ev) = events.next().await {
                     match ev {
                         bluer::DeviceEvent::PropertyChanged(prop) => {
@@ -286,91 +445,37 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                 } else {
                                     (status & 0x02) != 0
                                 };
-                                let is_flipped = !primary_left;
+                                let [left, right, case] = batteries(apple_data[5], &decrypted);
 
-                                let left_byte_index = if is_flipped { 2 } else { 1 };
-                                let right_byte_index = if is_flipped { 1 } else { 2 };
-
-                                let left_byte = decrypted[left_byte_index] as i32;
-                                let right_byte = decrypted[right_byte_index] as i32;
-                                let case_byte = decrypted[3] as i32;
-
-                                let (left_battery, left_charging) = if left_byte == 0xff {
-                                    (0, false)
-                                } else {
-                                    (left_byte & 0x7F, (left_byte & 0x80) != 0)
-                                };
-                                let (right_battery, right_charging) = if right_byte == 0xff {
-                                    (0, false)
-                                } else {
-                                    (right_byte & 0x7F, (right_byte & 0x80) != 0)
-                                };
-                                let (case_battery, case_charging) = if case_byte == 0xff {
-                                    (0, false)
-                                } else {
-                                    (case_byte & 0x7F, (case_byte & 0x80) != 0)
-                                };
+                                notice_lid_open(
+                                    &name,
+                                    &matched_airpods_mac,
+                                    apple_data,
+                                    &decrypted,
+                                    &mut lid,
+                                    &lid_notices,
+                                );
 
                                 if let Some(handle) = &tray_handle_clone {
+                                    let level = |b: &BatteryInfo| {
+                                        (b.status != BatteryStatus::Disconnected).then_some(b.level)
+                                    };
+                                    let (l, r, c) = (left.clone(), right.clone(), case.clone());
                                     handle
-                                        .update(|tray: &mut MyTray| {
-                                            tray.battery_l = if left_byte == 0xff {
-                                                None
-                                            } else {
-                                                Some(left_battery as u8)
-                                            };
-                                            tray.battery_l_status = if left_byte == 0xff {
-                                                Some(BatteryStatus::Disconnected)
-                                            } else if left_charging {
-                                                Some(BatteryStatus::Charging)
-                                            } else {
-                                                Some(BatteryStatus::NotCharging)
-                                            };
-                                            tray.battery_r = if right_byte == 0xff {
-                                                None
-                                            } else {
-                                                Some(right_battery as u8)
-                                            };
-                                            tray.battery_r_status = if right_byte == 0xff {
-                                                Some(BatteryStatus::Disconnected)
-                                            } else if right_charging {
-                                                Some(BatteryStatus::Charging)
-                                            } else {
-                                                Some(BatteryStatus::NotCharging)
-                                            };
-                                            tray.battery_c = if case_byte == 0xff {
-                                                None
-                                            } else {
-                                                Some(case_battery as u8)
-                                            };
-                                            tray.battery_c_status = if case_byte == 0xff {
-                                                Some(BatteryStatus::Disconnected)
-                                            } else if case_charging {
-                                                Some(BatteryStatus::Charging)
-                                            } else {
-                                                Some(BatteryStatus::NotCharging)
-                                            };
+                                        .update(move |tray: &mut MyTray| {
+                                            tray.battery_l = level(&l);
+                                            tray.battery_l_status = Some(l.status);
+                                            tray.battery_r = level(&r);
+                                            tray.battery_r_status = Some(r.status);
+                                            tray.battery_c = level(&c);
+                                            tray.battery_c_status = Some(c.status);
                                         })
                                         .await;
                                 }
 
                                 debug!(
-                                    "Battery status: Left: {}, Right: {}, Case: {}, InEar: L:{} R:{}",
-                                    if left_byte == 0xff {
-                                        "disconnected".to_string()
-                                    } else {
-                                        format!("{}% (charging: {})", left_battery, left_charging)
-                                    },
-                                    if right_byte == 0xff {
-                                        "disconnected".to_string()
-                                    } else {
-                                        format!("{}% (charging: {})", right_battery, right_charging)
-                                    },
-                                    if case_byte == 0xff {
-                                        "disconnected".to_string()
-                                    } else {
-                                        format!("{}% (charging: {})", case_battery, case_charging)
-                                    },
+                                    "Battery status: {:?}, InEar: L:{} R:{}",
+                                    [left, right, case],
                                     is_left_in_ear,
                                     is_right_in_ear
                                 );
@@ -383,4 +488,120 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The proximity pairing example from librepods' notes, with `status` and
+    /// `lid` swapped in. Apple's company ID is already stripped.
+    fn advert(status: u8, lid: u8) -> Vec<u8> {
+        let mut data = vec![
+            0x07, 0x12, 0x01, 0x0E, 0x20, status, 0xA7, 0xB3, lid, 0x02, 0x04,
+        ];
+        data.extend([0u8; 16]);
+        data
+    }
+
+    const IN_CASE: u8 = 0x62;
+    const OUT_OF_CASE: u8 = 0x22;
+
+    #[test]
+    fn lid_bit_three_clear_is_open() {
+        assert_eq!(lid_state(&advert(IN_CASE, 0x01)), Some((true, 1)));
+        assert_eq!(lid_state(&advert(IN_CASE, 0x09)), Some((false, 1)));
+    }
+
+    #[test]
+    fn lid_unknown_unless_this_bud_is_in_the_case() {
+        assert_eq!(lid_state(&advert(OUT_OF_CASE, 0x01)), None);
+    }
+
+    #[test]
+    fn lid_unknown_for_other_messages() {
+        let mut pairing = advert(IN_CASE, 0x01);
+        pairing[2] = 0x00;
+        assert_eq!(lid_state(&pairing), None);
+        let mut other = advert(IN_CASE, 0x01);
+        other[0] = 0x10;
+        assert_eq!(lid_state(&other), None);
+        assert_eq!(lid_state(&[0x07, 0x12, 0x01]), None);
+    }
+
+    #[test]
+    fn notices_an_opening_once() {
+        let mut w = LidWatch::default();
+        assert!(w.opened(Some((true, 1))));
+        assert!(!w.opened(Some((true, 1))));
+        assert!(!w.opened(None));
+        assert!(!w.opened(Some((false, 1))));
+        assert!(w.opened(Some((true, 2))));
+    }
+
+    #[test]
+    fn a_new_open_count_is_a_new_opening_even_if_the_close_was_missed() {
+        let mut w = LidWatch::default();
+        assert!(w.opened(Some((true, 3))));
+        assert!(w.opened(Some((true, 4))));
+    }
+
+    #[test]
+    fn both_buds_reporting_one_opening_notify_once() {
+        let t = Instant::now();
+        let mut n = LidNotices::default();
+        assert!(n.due("AA", t));
+        assert!(!n.due("AA", t + Duration::from_secs(1)));
+        assert!(n.due("BB", t + Duration::from_secs(1)));
+        assert!(n.due("AA", t + LID_NOTICE_COOLDOWN));
+    }
+
+    #[test]
+    fn batteries_follow_the_primary_bud() {
+        let mut dec = [0u8; 16];
+        dec[1] = 0x55;
+        dec[2] = 0xD0;
+        dec[3] = 0xFF;
+        let left_primary = batteries(IN_CASE, &dec);
+        assert_eq!(
+            left_primary,
+            [
+                BatteryInfo {
+                    component: BatteryComponent::Left,
+                    level: 85,
+                    status: BatteryStatus::NotCharging
+                },
+                BatteryInfo {
+                    component: BatteryComponent::Right,
+                    level: 80,
+                    status: BatteryStatus::Charging
+                },
+                BatteryInfo {
+                    component: BatteryComponent::Case,
+                    level: 0,
+                    status: BatteryStatus::Disconnected
+                },
+            ]
+        );
+        let right_primary = batteries(IN_CASE & !0x20, &dec);
+        assert_eq!(right_primary[0].level, 80);
+        assert_eq!(right_primary[1].level, 85);
+    }
+
+    #[test]
+    fn lid_open_body_lists_what_is_reported() {
+        let mut dec = [0u8; 16];
+        dec[1] = 0x55;
+        dec[2] = 0xD0;
+        dec[3] = 0x3C;
+        assert_eq!(
+            lid_open_body(&batteries(IN_CASE, &dec)),
+            "Left: 85%, Right: 80% (charging), Case: 60%"
+        );
+        dec[3] = 0xFF;
+        assert_eq!(
+            lid_open_body(&batteries(IN_CASE, &dec)),
+            "Left: 85%, Right: 80% (charging)"
+        );
+    }
 }

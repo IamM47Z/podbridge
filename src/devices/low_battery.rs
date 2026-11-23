@@ -65,7 +65,7 @@ pub fn alert_body(crossed: &[(BatteryComponent, u8)]) -> String {
 }
 
 /// Show a desktop notification. Blocking: call it off the async runtime.
-pub fn notify(body: &str) {
+pub fn notify(summary: &str, body: &str) {
     use dbus::arg::{PropMap, Variant};
     let result = dbus::blocking::Connection::new_session().and_then(|conn| {
         let proxy = conn.with_proxy(
@@ -84,7 +84,7 @@ pub fn notify(body: &str) {
                     "podbridge",
                     0u32,
                     crate::ui::window::APP_ID,
-                    "AirPods battery low",
+                    summary,
                     body,
                     actions,
                     hints,
@@ -94,7 +94,7 @@ pub fn notify(body: &str) {
             .map(|_| ())
     });
     if let Err(e) = result {
-        log::warn!("Failed to show the low-battery notification: {}", e);
+        log::warn!("Failed to show the notification \"{}\": {}", summary, e);
     }
 }
 
