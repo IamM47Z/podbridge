@@ -2,7 +2,6 @@ use crate::audio::card::{self, CardRef};
 use crate::audio::output::{connect, wait_op};
 use crate::bluetooth::aacp::AACPManager;
 use crate::bluetooth::aacp::EarDetectionStatus;
-use dbus::arg::RefArg;
 use dbus::blocking::Connection;
 use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use libpulse_binding::callbacks::ListResult;
@@ -22,6 +21,8 @@ use tokio::task::AbortHandle;
 
 // Reconnecting AirPods creates a fresh MediaController. Keep the listener task
 // outside the controller so the replacement can stop its predecessor by MAC.
+// Process-wide: it must outlive every controller, and no longer-lived owner
+// reaches both the old and the new one.
 static PLAYBACK_LISTENERS: LazyLock<StdMutex<HashMap<String, AbortHandle>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
@@ -140,7 +141,7 @@ impl MediaController {
         drop(state);
 
         let controller_clone = self.clone();
-        let mut listeners = PLAYBACK_LISTENERS.lock().unwrap();
+        let mut listeners = PLAYBACK_LISTENERS.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(previous_listener) = listeners.remove(&connected_device_mac) {
             previous_listener.abort();
         }
@@ -409,50 +410,54 @@ impl MediaController {
             // Debounced: adjusting a bud briefly reports both out. Media is
             // already paused; only switch the output if nobody put a bud back.
             let controller = self.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(AUDIO_OFF_DEBOUNCE).await;
-                // Right after connecting the sound server may not have the
-                // AirPods' card yet. It appears with A2DP on (and usually as the
-                // default output), so keep trying for a while: otherwise sound
-                // would go to AirPods nobody wears.
-                for attempt in 0..CARD_OFF_ATTEMPTS {
-                    {
-                        // Check and switch under the routing lock: a bud going
-                        // back in right now either sees the card already off
-                        // (and turns it back on) or makes still_out false here.
-                        // Without the lock, the bud-in path could see A2DP still
-                        // on, do nothing, and then this would switch it off with
-                        // a bud in.
-                        let _routing = controller.routing.lock().await;
-                        let (ended, still_out) = {
-                            let state = controller.state.lock().await;
-                            (
-                                state.connection_ended,
-                                !state.old_in_ear_data.iter().any(|&b| b),
-                            )
-                        };
-                        if ended {
-                            // The card found now would belong to a new connection
-                            // (which may well have a bud in an ear).
-                            debug!("AirPods disconnected meanwhile; not switching audio");
-                            return;
-                        }
-                        if !still_out {
-                            debug!("Bud back in ear within debounce; keeping AirPods audio");
-                            return;
-                        }
-                        if attempt == 0 {
-                            info!("No bud in ear; switching audio to another output");
-                        }
-                        if controller.deactivate_a2dp_profile_locked().await {
-                            return;
-                        }
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-                warn!("Could not switch the AirPods' audio off (no bud in ear)");
-            });
+            tokio::spawn(async move { controller.audio_off_after_debounce().await });
         }
+    }
+
+    /// Switch the AirPods' audio off once no bud has been in for
+    /// AUDIO_OFF_DEBOUNCE.
+    async fn audio_off_after_debounce(&self) {
+        tokio::time::sleep(AUDIO_OFF_DEBOUNCE).await;
+        // Right after connecting the sound server may not have the
+        // AirPods' card yet. It appears with A2DP on (and usually as the
+        // default output), so keep trying for a while: otherwise sound
+        // would go to AirPods nobody wears.
+        for attempt in 0..CARD_OFF_ATTEMPTS {
+            {
+                // Check and switch under the routing lock: a bud going
+                // back in right now either sees the card already off
+                // (and turns it back on) or makes still_out false here.
+                // Without the lock, the bud-in path could see A2DP still
+                // on, do nothing, and then this would switch it off with
+                // a bud in.
+                let _routing = self.routing.lock().await;
+                let (ended, still_out) = {
+                    let state = self.state.lock().await;
+                    (
+                        state.connection_ended,
+                        !state.old_in_ear_data.iter().any(|&b| b),
+                    )
+                };
+                if ended {
+                    // The card found now would belong to a new connection
+                    // (which may well have a bud in an ear).
+                    debug!("AirPods disconnected meanwhile; not switching audio");
+                    return;
+                }
+                if !still_out {
+                    debug!("Bud back in ear within debounce; keeping AirPods audio");
+                    return;
+                }
+                if attempt == 0 {
+                    info!("No bud in ear; switching audio to another output");
+                }
+                if self.deactivate_a2dp_profile_locked().await {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        warn!("Could not switch the AirPods' audio off (no bud in ear)");
     }
 
     pub async fn activate_a2dp_profile(&self) {
@@ -487,35 +492,7 @@ impl MediaController {
         let mac = state.connected_device_mac.clone();
         drop(state);
 
-        // Look the card up fresh and wait for its A2DP profiles: right after the
-        // AirPods connect, ear detection can arrive before PipeWire has created
-        // the bluez card or before BlueZ has connected A2DP, and the card index
-        // changes whenever the card is recreated. A WirePlumber restart is only
-        // a last resort (it cuts every audio stream).
-        let mut ready = false;
-        let mut a2dp_requested = false;
-        for attempt in 0..A2DP_WAIT_ATTEMPTS {
-            if let Some(idx) = self.get_audio_device_index(&mac).await {
-                self.state.lock().await.device_index = Some(idx);
-                if self.is_a2dp_profile_available().await {
-                    ready = true;
-                    break;
-                }
-                // The card is there without A2DP: BlueZ linked only the
-                // headset profile. Ask for A2DP once instead of waiting.
-                if !a2dp_requested {
-                    a2dp_requested = true;
-                    match crate::bluetooth::discovery::connect_a2dp_profile(&mac).await {
-                        Ok(()) => info!("Asked BlueZ to connect the A2DP profile"),
-                        Err(e) => warn!("Could not connect the A2DP profile: {}", e),
-                    }
-                }
-            }
-            debug!("A2DP not available yet (attempt {}), waiting", attempt + 1);
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-
-        if !ready {
+        if !self.wait_for_a2dp_profile(&mac).await {
             warn!("A2DP profile still not available after waiting");
             if !restart_if_missing {
                 return;
@@ -538,44 +515,78 @@ impl MediaController {
 
         let device_index = self.state.lock().await.device_index;
         if let Some(idx) = device_index {
-            let active =
-                tokio::task::spawn_blocking(move || card::active_profile(CardRef::Index(idx)))
-                    .await
-                    .unwrap_or(None);
-            if is_a2dp_profile(active.as_deref()) {
-                // Re-setting a profile restarts the transport for nothing, and a
-                // codec switch can fail and re-create the card: leave any active
-                // A2DP profile alone.
-                debug!("A2DP profile {:?} already active", active);
-                self.restore_saved_streams(idx).await;
-                self.restore_pending_conv_volume().await;
-                // First activation after (re)connecting: the sink just appeared.
-                self.refresh_desktop_default(false).await;
-                return;
-            }
-            info!("Activating A2DP profile for AirPods: {}", preferred_profile);
-            let profile_name = preferred_profile.clone();
-            let success = tokio::task::spawn_blocking(move || {
-                card::set_profile(CardRef::Index(idx), &profile_name)
-            })
-            .await
-            .unwrap_or(false);
-
-            if success {
-                info!("Successfully activated A2DP profile: {}", preferred_profile);
-                // Fresh transport: a hi-res A2DP reset requested before this
-                // can be skipped (see hires_mic::schedule_a2dp_reset).
-                if active.as_deref().is_none_or(|p| !p.starts_with("a2dp")) {
-                    card::note_activated();
-                }
-                self.restore_saved_streams(idx).await;
-                self.restore_pending_conv_volume().await;
-                self.refresh_desktop_default(true).await;
-            } else {
-                warn!("Failed to activate A2DP profile: {}", preferred_profile);
-            }
+            self.switch_to_a2dp_profile(idx, preferred_profile).await;
         } else {
             error!("Device index not available for activating profile.");
+        }
+    }
+
+    /// Look the card up fresh and wait for its A2DP profiles: right after the
+    /// AirPods connect, ear detection can arrive before PipeWire has created
+    /// the bluez card or before BlueZ has connected A2DP, and the card index
+    /// changes whenever the card is recreated. A WirePlumber restart is only
+    /// a last resort (it cuts every audio stream). Returns true once ready.
+    async fn wait_for_a2dp_profile(&self, mac: &str) -> bool {
+        let mut a2dp_requested = false;
+        for attempt in 0..A2DP_WAIT_ATTEMPTS {
+            if let Some(idx) = self.get_audio_device_index(mac).await {
+                self.state.lock().await.device_index = Some(idx);
+                if self.is_a2dp_profile_available().await {
+                    return true;
+                }
+                // The card is there without A2DP: BlueZ linked only the
+                // headset profile. Ask for A2DP once instead of waiting.
+                if !a2dp_requested {
+                    a2dp_requested = true;
+                    match crate::bluetooth::discovery::connect_a2dp_profile(mac).await {
+                        Ok(()) => info!("Asked BlueZ to connect the A2DP profile"),
+                        Err(e) => warn!("Could not connect the A2DP profile: {}", e),
+                    }
+                }
+            }
+            debug!("A2DP not available yet (attempt {}), waiting", attempt + 1);
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        false
+    }
+
+    /// Put card `idx` on `preferred_profile` unless an A2DP profile is already
+    /// active, then bring back what switching it off took away.
+    async fn switch_to_a2dp_profile(&self, idx: u32, preferred_profile: String) {
+        let active = tokio::task::spawn_blocking(move || card::active_profile(CardRef::Index(idx)))
+            .await
+            .unwrap_or(None);
+        if is_a2dp_profile(active.as_deref()) {
+            // Re-setting a profile restarts the transport for nothing, and a
+            // codec switch can fail and re-create the card: leave any active
+            // A2DP profile alone.
+            debug!("A2DP profile {:?} already active", active);
+            self.restore_saved_streams(idx).await;
+            self.restore_pending_conv_volume().await;
+            // First activation after (re)connecting: the sink just appeared.
+            self.refresh_desktop_default(false).await;
+            return;
+        }
+        info!("Activating A2DP profile for AirPods: {}", preferred_profile);
+        let profile_name = preferred_profile.clone();
+        let success = tokio::task::spawn_blocking(move || {
+            card::set_profile(CardRef::Index(idx), &profile_name)
+        })
+        .await
+        .unwrap_or(false);
+
+        if success {
+            info!("Successfully activated A2DP profile: {}", preferred_profile);
+            // Fresh transport: a hi-res A2DP reset requested before this
+            // can be skipped (see hires_mic::schedule_a2dp_reset).
+            if active.as_deref().is_none_or(|p| !p.starts_with("a2dp")) {
+                card::note_activated();
+            }
+            self.restore_saved_streams(idx).await;
+            self.restore_pending_conv_volume().await;
+            self.refresh_desktop_default(true).await;
+        } else {
+            warn!("Failed to activate A2DP profile: {}", preferred_profile);
         }
     }
 
@@ -617,7 +628,7 @@ impl MediaController {
             paused_services
         })
         .await
-        .unwrap();
+        .unwrap_or_default();
 
         if !paused_services.is_empty() {
             info!("Paused {} media player(s) via DBus", paused_services.len());
@@ -664,7 +675,7 @@ impl MediaController {
             paused_count
         })
         .await
-        .unwrap();
+        .unwrap_or_default();
 
         if paused_count > 0 {
             info!(
@@ -715,7 +726,7 @@ impl MediaController {
             resumed_count
         })
         .await
-        .unwrap();
+        .unwrap_or_default();
 
         if resumed_count > 0 {
             info!("Resumed {} media player(s) via DBus", resumed_count);
@@ -918,11 +929,13 @@ impl MediaController {
             .get_audio_device_index(&state.connected_device_mac)
             .await;
 
-        if state.connected_device_mac.is_empty() || state.device_index.is_none() {
+        let Some(device_index) = state
+            .device_index
+            .filter(|_| !state.connected_device_mac.is_empty())
+        else {
             debug!("No sound card for the AirPods (yet); cannot switch its profile off");
             return false;
-        }
-        let device_index = state.device_index.unwrap();
+        };
         drop(state);
 
         // Remember which apps were playing to the AirPods; streams that target
@@ -988,101 +1001,11 @@ impl MediaController {
         .unwrap_or(None);
 
         match status {
-            1 => {
-                // Without the current volume there is nothing to restore to
-                // later (restoring a made-up 0% would mute the AirPods).
-                let Some(original) = current_volume_opt else {
-                    warn!("Could not read the AirPods volume; not lowering it");
-                    return;
-                };
-                debug!("Conversation start (1). Current volume: {}", original);
-                {
-                    let mut state = self.state.lock().await;
-                    if !state.conv_conversation_started {
-                        state.conv_original_volume = Some(original);
-                        state.conv_conversation_started = true;
-                        // Persist it so a disconnect mid-conversation can't leave
-                        // the AirPods at 25% (restored on the next activation).
-                        crate::utils::AppSettings::update(|s| {
-                            s.conv_volume_restore = Some(original)
-                        });
-                    } else {
-                        debug!(
-                            "Conversation already started; not overwriting conv_original_volume"
-                        );
-                    }
-                }
-                if original > 25 {
-                    let sink_clone = sink.clone();
-                    tokio::task::spawn_blocking(move || transition_sink_volume(&sink_clone, 25))
-                        .await
-                        .unwrap_or(false);
-                    info!(
-                        "Conversation start: lowered volume to 25% (original {})",
-                        original
-                    );
-                } else {
-                    debug!("Original volume {} <= 25, not reducing to 25", original);
-                }
-            }
-            2 => {
-                let original = self.state.lock().await.conv_original_volume;
-                if let Some(orig) = original {
-                    debug!("Conversation reduce (2). Original: {}", orig);
-                    if orig > 15 {
-                        let sink_clone = sink.clone();
-                        tokio::task::spawn_blocking(move || {
-                            transition_sink_volume(&sink_clone, 15)
-                        })
-                        .await
-                        .unwrap_or(false);
-                        info!(
-                            "Conversation reduce: lowered volume to 15% (original {})",
-                            orig
-                        );
-                    } else {
-                        debug!("Original {} <= 15, not reducing to 15", orig);
-                    }
-                } else {
-                    debug!("No original volume known for status 2, skipping");
-                }
-            }
+            1 => self.conversation_started(&sink, current_volume_opt).await,
+            2 => self.conversation_reduce(&sink).await,
             3 => {
-                let (conv_started, conv_original) = {
-                    let state = self.state.lock().await;
-                    (state.conv_conversation_started, state.conv_original_volume)
-                };
-                if !conv_started {
-                    debug!("Received status 3 but conversation was not started; ignoring increase");
-                    return;
-                }
-                if let Some(orig) = conv_original {
-                    let target = orig.min(25);
-                    let sink_clone = sink.clone();
-                    tokio::task::spawn_blocking(move || {
-                        transition_sink_volume(&sink_clone, target)
-                    })
+                self.conversation_partial_increase(&sink, current_volume_opt)
                     .await
-                    .unwrap_or(false);
-                    info!(
-                        "Conversation partial increase (3): set volume to {} (original {})",
-                        target, orig
-                    );
-                } else if let Some(orig_from_current) = current_volume_opt {
-                    let target = orig_from_current.min(25);
-                    let sink_clone = sink.clone();
-                    tokio::task::spawn_blocking(move || {
-                        transition_sink_volume(&sink_clone, target)
-                    })
-                    .await
-                    .unwrap_or(false);
-                    info!(
-                        "Conversation partial increase (3) with fallback current: set volume to {} (measured {})",
-                        target, orig_from_current
-                    );
-                } else {
-                    debug!("No original volume known for status 3, skipping");
-                }
             }
             4 | 6 | 7 => {
                 debug!("Conversation end ({}), restoring volume if needed", status);
@@ -1094,8 +1017,100 @@ impl MediaController {
         }
     }
 
+    /// Conversation awareness status 1: duck the volume to 25%.
+    async fn conversation_started(&self, sink: &str, current_volume_opt: Option<u32>) {
+        // Without the current volume there is nothing to restore to
+        // later (restoring a made-up 0% would mute the AirPods).
+        let Some(original) = current_volume_opt else {
+            warn!("Could not read the AirPods volume; not lowering it");
+            return;
+        };
+        debug!("Conversation start (1). Current volume: {}", original);
+        {
+            let mut state = self.state.lock().await;
+            if !state.conv_conversation_started {
+                state.conv_original_volume = Some(original);
+                state.conv_conversation_started = true;
+                // Persist it so a disconnect mid-conversation can't leave
+                // the AirPods at 25% (restored on the next activation).
+                crate::utils::AppSettings::update(|s| s.conv_volume_restore = Some(original));
+            } else {
+                debug!("Conversation already started; not overwriting conv_original_volume");
+            }
+        }
+        if original > 25 {
+            let sink_clone = sink.to_string();
+            tokio::task::spawn_blocking(move || transition_sink_volume(&sink_clone, 25))
+                .await
+                .unwrap_or(false);
+            info!(
+                "Conversation start: lowered volume to 25% (original {})",
+                original
+            );
+        } else {
+            debug!("Original volume {} <= 25, not reducing to 25", original);
+        }
+    }
+
+    /// Conversation awareness status 2: duck further, to 15%.
+    async fn conversation_reduce(&self, sink: &str) {
+        let original = self.state.lock().await.conv_original_volume;
+        if let Some(orig) = original {
+            debug!("Conversation reduce (2). Original: {}", orig);
+            if orig > 15 {
+                let sink_clone = sink.to_string();
+                tokio::task::spawn_blocking(move || transition_sink_volume(&sink_clone, 15))
+                    .await
+                    .unwrap_or(false);
+                info!(
+                    "Conversation reduce: lowered volume to 15% (original {})",
+                    orig
+                );
+            } else {
+                debug!("Original {} <= 15, not reducing to 15", orig);
+            }
+        } else {
+            debug!("No original volume known for status 2, skipping");
+        }
+    }
+
+    /// Conversation awareness status 3: back up to at most 25%.
+    async fn conversation_partial_increase(&self, sink: &str, current_volume_opt: Option<u32>) {
+        let (conv_started, conv_original) = {
+            let state = self.state.lock().await;
+            (state.conv_conversation_started, state.conv_original_volume)
+        };
+        if !conv_started {
+            debug!("Received status 3 but conversation was not started; ignoring increase");
+            return;
+        }
+        if let Some(orig) = conv_original {
+            let target = orig.min(25);
+            let sink_clone = sink.to_string();
+            tokio::task::spawn_blocking(move || transition_sink_volume(&sink_clone, target))
+                .await
+                .unwrap_or(false);
+            info!(
+                "Conversation partial increase (3): set volume to {} (original {})",
+                target, orig
+            );
+        } else if let Some(orig_from_current) = current_volume_opt {
+            let target = orig_from_current.min(25);
+            let sink_clone = sink.to_string();
+            tokio::task::spawn_blocking(move || transition_sink_volume(&sink_clone, target))
+                .await
+                .unwrap_or(false);
+            info!(
+                "Conversation partial increase (3) with fallback current: set volume to {} (measured {})",
+                target, orig_from_current
+            );
+        } else {
+            debug!("No original volume known for status 3, skipping");
+        }
+    }
+
     async fn mpris_command(&self, command: &'static str) {
-        tokio::task::spawn_blocking(move || {
+        let _ = tokio::task::spawn_blocking(move || {
             let conn = match Connection::new_session() {
                 Ok(c) => c,
                 Err(_) => return,
@@ -1133,8 +1148,7 @@ impl MediaController {
                 }
             }
         })
-        .await
-        .unwrap();
+        .await;
     }
 
     async fn restore_volume_if_needed(&self, sink: &str) {
@@ -1268,6 +1282,8 @@ impl MediaController {
 /// ~8 s of 500 ms attempts waiting for the bluez card and its A2DP profiles.
 const A2DP_WAIT_ATTEMPTS: u32 = 16;
 const WIREPLUMBER_RESTART_COOLDOWN: Duration = Duration::from_secs(600);
+/// Process-wide: the cooldown guards the one session-wide WirePlumber service
+/// across every connection's controller.
 static LAST_WIREPLUMBER_RESTART: std::sync::Mutex<Option<std::time::Instant>> =
     std::sync::Mutex::new(None);
 
@@ -1514,8 +1530,7 @@ pub fn transition_sink_volume(sink_name: &str, target_volume: u32) -> bool {
     if let Some(info) = sink_info.borrow().as_ref() {
         let channels = info.volume.len();
         let mut new_volumes = ChannelVolumes::default();
-        let raw =
-            (((target_volume as f64) / 100.0) * Volume::NORMAL.0.as_f64().unwrap()).round() as u32;
+        let raw = (((target_volume as f64) / 100.0) * Volume::NORMAL.0 as f64).round() as u32;
         new_volumes.set(channels, Volume(raw));
 
         let op = introspector.set_sink_volume_by_name(sink_name, &new_volumes, None);

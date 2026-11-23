@@ -8,10 +8,33 @@ use std::path::PathBuf;
 /// The folder name under the XDG data, config and state folders.
 pub const APP_DIR: &str = "podbridge";
 
+/// `$<xdg_var>/podbridge`, or `$HOME/<home_fallback>/podbridge` when unset.
+pub fn app_dir(xdg_var: &str, home_fallback: &str) -> PathBuf {
+    #[cfg(test)]
+    {
+        // Tests never touch the real user folders: every path lives in a
+        // per-process folder under the system temp dir.
+        let _ = home_fallback;
+        std::env::temp_dir()
+            .join(format!("podbridge-test-{}", std::process::id()))
+            .join(xdg_var)
+            .join(APP_DIR)
+    }
+    #[cfg(not(test))]
+    {
+        let base = std::env::var(xdg_var).unwrap_or_else(|_| {
+            format!(
+                "{}/{}",
+                std::env::var("HOME").unwrap_or_default(),
+                home_fallback
+            )
+        });
+        PathBuf::from(base).join(APP_DIR)
+    }
+}
+
 pub fn get_devices_path() -> PathBuf {
-    let data_dir = std::env::var("XDG_DATA_HOME")
-        .unwrap_or_else(|_| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()));
-    PathBuf::from(data_dir).join(APP_DIR).join("devices.json")
+    app_dir("XDG_DATA_HOME", ".local/share").join("devices.json")
 }
 
 /// Write a file atomically: write a temp file next to it, then rename over it.
@@ -67,22 +90,11 @@ pub fn ensure_device_registered(mac: &str, name: &str, type_: crate::devices::en
 }
 
 pub fn get_preferences_path() -> PathBuf {
-    let config_dir = std::env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_default()));
-    PathBuf::from(config_dir)
-        .join(APP_DIR)
-        .join("preferences.json")
+    app_dir("XDG_CONFIG_HOME", ".config").join("preferences.json")
 }
 
 pub fn get_app_settings_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-
-    let config_dir =
-        std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", home));
-
-    let new_path = PathBuf::from(&config_dir)
-        .join(APP_DIR)
-        .join("app_settings.json");
+    let new_path = app_dir("XDG_CONFIG_HOME", ".config").join("app_settings.json");
 
     // Callers write here with fs::write, which fails silently without the folder.
     if let Some(parent) = new_path.parent() {
@@ -292,6 +304,25 @@ impl From<MyTheme> for Theme {
             MyTheme::Nightfly => Theme::Nightfly,
             MyTheme::Oxocarbon => Theme::Oxocarbon,
             MyTheme::Ferra => Theme::Ferra,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_paths_stay_out_of_the_user_folders() {
+        let root = std::env::temp_dir().join(format!("podbridge-test-{}", std::process::id()));
+        for path in [
+            super::get_devices_path(),
+            super::get_preferences_path(),
+            super::get_app_settings_path(),
+        ] {
+            assert!(
+                path.starts_with(&root),
+                "{} is outside the test root",
+                path.display()
+            );
         }
     }
 }

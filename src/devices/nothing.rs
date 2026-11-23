@@ -103,11 +103,7 @@ impl NothingDevice {
                             information: Some(DeviceInformation::Nothing(new_information)),
                         },
                     );
-                    let json = serde_json::to_string(&new_devices).unwrap();
-                    if let Err(e) = crate::utils::write_atomic(&get_devices_path(), json.as_bytes())
-                    {
-                        log::error!("Failed to write devices file: {}", e);
-                    }
+                    save_devices(&new_devices);
                 } else if data.starts_with(&[0x55, 0x20, 0x01, 0x06, 0x40]) {
                     let serial_number_start_position = data
                         .iter()
@@ -147,12 +143,7 @@ impl NothingDevice {
                                 information: Some(DeviceInformation::Nothing(new_information)),
                             },
                         );
-                        let json = serde_json::to_string(&new_devices).unwrap();
-                        if let Err(e) =
-                            crate::utils::write_atomic(&get_devices_path(), json.as_bytes())
-                        {
-                            log::error!("Failed to write devices file: {}", e);
-                        }
+                        save_devices(&new_devices);
                     } else {
                         debug!(
                             "Serial number format unexpected from Nothing device {}: {:?}",
@@ -169,5 +160,16 @@ impl NothingDevice {
         });
 
         Ok(NothingDevice { att_manager })
+    }
+}
+
+fn save_devices(devices: &HashMap<String, DeviceData>) {
+    match serde_json::to_string(devices) {
+        Ok(json) => {
+            if let Err(e) = crate::utils::write_atomic(&get_devices_path(), json.as_bytes()) {
+                log::error!("Failed to write devices file: {}", e);
+            }
+        }
+        Err(e) => log::error!("Failed to serialize devices file: {}", e),
     }
 }

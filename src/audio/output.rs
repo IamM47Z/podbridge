@@ -27,6 +27,8 @@ pub const SOURCE_NAME: &str = "AirPodsHiRes";
 // one device, so it is turned off at runtime only while the AirPods are
 // connected and handed back afterwards. Nothing is saved (no --save).
 
+/// Process-wide: it records a change to the session-wide WirePlumber setting,
+/// which park_on_exit() must hand back at exit with no connection at hand.
 static AUTOSWITCH_OWED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const AUTOSWITCH_KEY: &str = "bluetooth.autoswitch-to-headset-profile";
 
@@ -111,6 +113,8 @@ pub fn headset_source(addr: &str) -> Option<String> {
 /// AirPods already take about 300 ms to send their first frame). Process-wide;
 /// the target is replaced on every call.
 pub fn watch_recorders(wake: std::sync::Arc<tokio::sync::Notify>) {
+    // Process-wide: one watcher thread for the process (STARTED), and the
+    // monitor it currently wakes (TARGET), replaced by each new connection.
     static TARGET: std::sync::Mutex<Option<std::sync::Arc<tokio::sync::Notify>>> =
         std::sync::Mutex::new(None);
     static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use crate::audio::output::{connect, wait_op};
 
+/// Process-wide: it serialises changes to the sound server's card profiles,
+/// one system-wide resource that every task and connection shares.
 static PROFILE_LOCK: Mutex<()> = Mutex::new(());
 
 /// How long no bud may be worn before the AirPods' audio switches to another
@@ -23,7 +25,9 @@ static PROFILE_LOCK: Mutex<()> = Mutex::new(());
 pub const NOT_WORN_GRACE: Duration = Duration::from_secs(4);
 
 /// When an A2DP profile was last switched on from off. Switching on creates a
-/// fresh transport, which makes a pending A2DP reset unnecessary.
+/// fresh transport, which makes a pending A2DP reset unnecessary. Process-wide:
+/// it describes the one card, written by the media controller and read by the
+/// hi-res mic's reset task, which share no owner.
 static LAST_ACTIVATION: Mutex<Option<Instant>> = Mutex::new(None);
 
 pub fn note_activated() {
