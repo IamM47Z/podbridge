@@ -12,6 +12,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -37,9 +39,8 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      # shortcut: warnings only until the inherited ones are cleaned up; then add -D warnings.
       - name: Clippy
-        run: cargo clippy --release --locked
+        run: cargo clippy --release --locked --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --release --locked
