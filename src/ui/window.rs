@@ -115,6 +115,9 @@ pub enum Message {
     CopyToClipboard(String),
     Bluetooth(BluetoothUIMessage),
     // ShowNewDialogTab,
+    // shortcut: upstream disabled the add-device tab (4a9a2e7, no reason given); it is
+    // the only UI path to add a Nothing device. Re-enable or replace it, then drop these.
+    #[expect(dead_code, reason = "add-device tab disabled upstream")]
     GotPairedDevices(HashMap<String, Address>),
     StartAddDevice(String, Address),
     SelectDeviceType(DeviceType),
@@ -135,6 +138,7 @@ pub enum Message {
 pub enum Tab {
     Device(String),
     Settings,
+    #[expect(dead_code, reason = "add-device tab disabled upstream")]
     AddDevice,
 }
 

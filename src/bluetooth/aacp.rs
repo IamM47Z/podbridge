@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, mpsc, watch};
 use tokio::task::JoinSet;
@@ -57,8 +57,19 @@ pub mod opcodes {
     pub const AUDIO_SOURCE: u8 = 0x0E;
     pub const SMART_ROUTING: u8 = 0x10;
     pub const SMART_ROUTING_RESP: u8 = 0x11;
+    // shortcut: protocol parts for features not wired yet; each `expect` fails the
+    // build once the feature uses it, so it is removed then.
+    #[expect(
+        dead_code,
+        reason = "connected-MAC report: wired by the Apple-parity plan"
+    )]
     pub const SEND_CONNECTED_MAC: u8 = 0x14;
+    #[expect(dead_code, reason = "head tracking: wired by the Apple-parity plan")]
     pub const HEADTRACKING: u8 = 0x17;
+    #[expect(
+        dead_code,
+        reason = "unknown opcode, documented upstream: wired by the Apple-parity plan"
+    )]
     pub const TIPI_3: u8 = 0x0C;
 }
 
@@ -321,8 +332,18 @@ pub enum AACPEvent {
     ControlCommand(ControlCommandStatus),
     EarDetection(Vec<EarDetectionStatus>, Vec<EarDetectionStatus>),
     ConversationalAwareness(u8),
+    #[expect(
+        dead_code,
+        reason = "proximity-key exchange: wired by the Apple-parity plan"
+    )]
     ProximityKeys(Vec<(u8, Vec<u8>)>),
-    AudioSource(AudioSource),
+    AudioSource(
+        #[expect(
+            dead_code,
+            reason = "audio-source owner: wired by the Apple-parity plan"
+        )]
+        AudioSource,
+    ),
     ConnectedDevices(Vec<ConnectedDevice>, Vec<ConnectedDevice>),
     OwnershipToFalseRequest,
     StemPress(StemPressType, StemPressBudType),
@@ -412,7 +433,6 @@ pub struct AACPManager {
     /// they don't pile up across reconnects.
     connected: Arc<watch::Sender<bool>>,
     /// Incremented on every ear-detection report.
-    ear_generation: Arc<AtomicU64>,
     /// The user changed conversation awareness while a capture had it
     /// overridden; the capture then must not restore its saved value.
     convo_user_changed: Arc<AtomicBool>,
@@ -431,7 +451,6 @@ impl AACPManager {
             mic_status: crate::audio::hires_mic::MicStatus::new(),
             runtime: tokio::runtime::Handle::current(),
             connected: Arc::new(watch::channel(false).0),
-            ear_generation: Arc::new(AtomicU64::new(0)),
             convo_user_changed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -480,11 +499,6 @@ impl AACPManager {
                 && source.mac != "00:00:00:00:00:00"
                 && !source.mac.eq_ignore_ascii_case(local_mac)
         })
-    }
-
-    /// Changes whenever the AirPods report a new ear-detection state.
-    pub fn ear_generation(&self) -> u64 {
-        self.ear_generation.load(Ordering::Relaxed)
     }
 
     /// Resolves once this connection has ended (immediately if it never came up).
@@ -951,7 +965,6 @@ impl AACPManager {
                     state.ear_detection_status
                 );
                 drop(state);
-                self.ear_generation.fetch_add(1, Ordering::Relaxed);
                 // The hi-res monitor ties capture to "a bud is in an ear"; re-check now.
                 self.hires_wake.notify_one();
             }
@@ -1485,6 +1498,10 @@ impl AACPManager {
         self.send_data_packet(&packet).await
     }
 
+    #[expect(
+        dead_code,
+        reason = "hand audio back to the other device: wired by the Apple-parity plan"
+    )]
     pub async fn send_hijack_reversed(&self, target_mac_address: &str) -> Result<()> {
         let opcode = [opcodes::SMART_ROUTING, 0x00];
         let mut buffer = Vec::with_capacity(97);

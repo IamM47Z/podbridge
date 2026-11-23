@@ -1,6 +1,5 @@
 use crate::bluetooth::att::{ATTHandles, ATTManager};
 use crate::devices::enums::{DeviceData, DeviceInformation, DeviceType};
-use crate::ui::messages::BluetoothUIMessage;
 use crate::utils::get_devices_path;
 use bluer::Address;
 use log::{debug, info};
@@ -18,14 +17,10 @@ pub struct NothingInformation {
 
 pub struct NothingDevice {
     pub att_manager: ATTManager,
-    pub information: NothingInformation,
 }
 
 impl NothingDevice {
-    pub async fn new(
-        mac_address: Address,
-        ui_tx: mpsc::UnboundedSender<BluetoothUIMessage>,
-    ) -> bluer::Result<Self> {
+    pub async fn new(mac_address: Address) -> bluer::Result<Self> {
         let mut att_manager = ATTManager::new();
         att_manager.connect(mac_address).await?;
 
@@ -80,7 +75,6 @@ impl NothingDevice {
             .await
             .unwrap_or_else(|e| log::error!("Failed to write to Nothing device: {}", e));
 
-        // let ui_tx_clone = ui_tx.clone();
         let information_l = information.clone();
         tokio::spawn(async move {
             while let Some(data) = rx.recv().await {
@@ -174,9 +168,6 @@ impl NothingDevice {
             }
         });
 
-        Ok(NothingDevice {
-            att_manager,
-            information,
-        })
+        Ok(NothingDevice { att_manager })
     }
 }

@@ -130,17 +130,6 @@ impl Display for NothingAncMode {
     }
 }
 impl NothingAncMode {
-    pub fn from_byte(value: u8) -> Self {
-        match value {
-            0x03 => NothingAncMode::LowNoiseCancellation,
-            0x02 => NothingAncMode::MidNoiseCancellation,
-            0x01 => NothingAncMode::HighNoiseCancellation,
-            0x04 => NothingAncMode::AdaptiveNoiseCancellation,
-            0x07 => NothingAncMode::Transparency,
-            0x05 => NothingAncMode::Off,
-            _ => NothingAncMode::Off,
-        }
-    }
     pub fn to_byte(&self) -> u8 {
         match self {
             NothingAncMode::LowNoiseCancellation => 0x03,

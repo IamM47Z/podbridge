@@ -260,9 +260,7 @@ async fn async_main(
                 let device_managers_sig = device_managers_sig.clone();
                 tokio::spawn(async move {
                     // Connect before taking the lock: the UI reads this map.
-                    let dev = match devices::nothing::NothingDevice::new(addr, ui_tx_clone.clone())
-                        .await
-                    {
+                    let dev = match devices::nothing::NothingDevice::new(addr).await {
                         Ok(dev) => dev,
                         Err(e) => {
                             warn!("Could not set up Nothing device {}: {}", addr_str, e);
@@ -410,11 +408,7 @@ async fn async_main(
                 tokio::spawn(async move {
                     if type_ == devices::enums::DeviceType::Nothing {
                         // Connect before taking the lock: the UI reads this map.
-                        let dev = match devices::nothing::NothingDevice::new(
-                            device.address(),
-                            ui_tx_clone.clone(),
-                        )
-                        .await
+                        let dev = match devices::nothing::NothingDevice::new(device.address()).await
                         {
                             Ok(dev) => dev,
                             Err(e) => {

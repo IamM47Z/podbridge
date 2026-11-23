@@ -13,6 +13,12 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 const OPCODE_ERROR_RESPONSE: u8 = 0x01;
+// shortcut: AirPods ATT settings are not wired yet; each `expect` fails the build
+// once the feature uses it, so it is removed then.
+#[expect(
+    dead_code,
+    reason = "ATT reads for AirPods settings: wired by the Apple-parity plan"
+)]
 const OPCODE_READ_REQUEST: u8 = 0x0A;
 const OPCODE_WRITE_REQUEST: u8 = 0x12;
 const OPCODE_HANDLE_VALUE_NTF: u8 = 0x1B;
@@ -52,8 +58,17 @@ fn classify_pdu(data: &[u8]) -> Pdu {
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ATTHandles {
+    #[expect(
+        dead_code,
+        reason = "transparency settings: wired by the Apple-parity plan"
+    )]
     AirPodsTransparency = 0x18,
+    #[expect(
+        dead_code,
+        reason = "loud sound reduction: wired by the Apple-parity plan"
+    )]
     AirPodsLoudSoundReduction = 0x1B,
+    #[expect(dead_code, reason = "hearing aid: wired by the Apple-parity plan")]
     AirPodsHearingAid = 0x2A,
     NothingEverything = 0x8002,
     NothingEverythingRead = 0x8005, // for some reason, and not the same as the write handle
@@ -61,6 +76,10 @@ pub enum ATTHandles {
 
 #[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+    dead_code,
+    reason = "ATT notifications for AirPods settings: wired by the Apple-parity plan"
+)]
 pub enum ATTCCCDHandles {
     Transparency = ATTHandles::AirPodsTransparency as u16 + 1,
     LoudSoundReduction = ATTHandles::AirPodsLoudSoundReduction as u16 + 1,
@@ -185,10 +204,18 @@ impl ATTManager {
         state.listeners.entry(handle as u16).or_default().push(tx);
     }
 
+    #[expect(
+        dead_code,
+        reason = "ATT access for AirPods settings: wired by the Apple-parity plan"
+    )]
     pub async fn enable_notifications(&self, handle: ATTHandles) -> Result<()> {
         self.write_cccd(handle.into(), &[0x01, 0x00]).await
     }
 
+    #[expect(
+        dead_code,
+        reason = "ATT access for AirPods settings: wired by the Apple-parity plan"
+    )]
     pub async fn read(&self, handle: ATTHandles) -> Result<Vec<u8>> {
         self.drain_stale_responses().await;
         let lsb = (handle as u16 & 0xFF) as u8;
@@ -209,6 +236,10 @@ impl ATTManager {
         Ok(())
     }
 
+    #[expect(
+        dead_code,
+        reason = "ATT access for AirPods settings: wired by the Apple-parity plan"
+    )]
     async fn write_cccd(&self, handle: ATTCCCDHandles, value: &[u8]) -> Result<()> {
         self.drain_stale_responses().await;
         let lsb = (handle as u16 & 0xFF) as u8;

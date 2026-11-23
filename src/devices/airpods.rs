@@ -13,10 +13,8 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 
 pub struct AirPodsDevice {
-    pub mac_address: Address,
     pub aacp_manager: AACPManager,
     // pub att_manager: ATTManager,
-    pub media_controller: Arc<Mutex<MediaController>>,
     // pub command_tx: Option<tokio::sync::mpsc::UnboundedSender<(ControlCommandIdentifiers, Vec<u8>)>>,
 }
 
@@ -32,14 +30,7 @@ impl AirPodsDevice {
         if !aacp_manager.connect(mac_address).await {
             // No control channel: nothing below can work (every send would
             // fail), and the tray must not claim the AirPods are connected.
-            return AirPodsDevice {
-                mac_address,
-                aacp_manager,
-                media_controller: Arc::new(Mutex::new(MediaController::new(
-                    mac_address.to_string(),
-                    local_mac,
-                ))),
-            };
+            return AirPodsDevice { aacp_manager };
         }
 
         // let mut att_manager = ATTManager::new();
@@ -438,10 +429,8 @@ impl AirPodsDevice {
         });
 
         AirPodsDevice {
-            mac_address,
             aacp_manager,
             // att_manager,
-            media_controller,
             // command_tx: Some(command_tx.clone()),
         }
     }

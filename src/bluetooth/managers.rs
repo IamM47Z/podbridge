@@ -23,6 +23,10 @@ impl DeviceManagers {
     }
 
     // keeping the att for airpods optional as it requires changes in system bluez config
+    #[expect(
+        dead_code,
+        reason = "AirPods ATT settings: wired by the Apple-parity plan"
+    )]
     pub fn with_both(aacp: AACPManager, att: ATTManager) -> Self {
         Self {
             att: Some(Arc::new(att)),
