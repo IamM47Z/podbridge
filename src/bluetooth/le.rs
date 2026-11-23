@@ -83,8 +83,9 @@ impl LidWatch {
     }
 }
 
-// shortcut: a guess; it only has to cover both buds advertising one opening.
-// The live tests may show a shorter one is enough.
+// shortcut: a guessed window for both buds reporting one opening. A real
+// reopening inside it is not shown. Upgrade: dedupe on the lid open counter
+// once the live tests show both buds share it.
 const LID_NOTICE_COOLDOWN: Duration = Duration::from_secs(10);
 
 /// The last lid-open notification per AirPods, shared by their buds.
@@ -106,7 +107,7 @@ impl LidNotices {
 }
 
 /// Left, right and case battery from the decrypted advert payload. The
-/// primary bud (status bit 5) comes first; 0xFF means not reported.
+/// primary bud, status bit 5, comes first. 0xFF means not reported.
 fn batteries(status: u8, decrypted: &[u8; 16]) -> [BatteryInfo; 3] {
     let primary_left = status & 0x20 != 0;
     let (left, right) = if primary_left { (1, 2) } else { (2, 1) };
@@ -331,6 +332,17 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                 && let Some(last_16) = apple_data.last_chunk::<16>()
                             {
                                 let decrypted = decrypt(enc_key, last_16);
+                                // Before auto-connect: its wait and its `continue` would
+                                // delay or skip the notice.
+                                notice_lid_open(
+                                    &name,
+                                    &matched_airpods_mac,
+                                    apple_data,
+                                    &decrypted,
+                                    &mut lid,
+                                    &lid_notices,
+                                );
+
                                 debug!(
                                     "Decrypted data from airpods_mac {}: {}",
                                     matched_airpods_mac,
@@ -446,15 +458,6 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                     (status & 0x02) != 0
                                 };
                                 let [left, right, case] = batteries(apple_data[5], &decrypted);
-
-                                notice_lid_open(
-                                    &name,
-                                    &matched_airpods_mac,
-                                    apple_data,
-                                    &decrypted,
-                                    &mut lid,
-                                    &lid_notices,
-                                );
 
                                 if let Some(handle) = &tray_handle_clone {
                                     let level = |b: &BatteryInfo| {
