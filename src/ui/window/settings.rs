@@ -35,7 +35,7 @@ impl App {
             Space::new().height(Length::from(20)),
             setting_toggle(
                 "Pause when one bud is removed",
-                "Pause media when you take one bud out, like an iPhone, and resume when it goes back in. When off, playback continues in the other bud.",
+                "Pause media when you take one bud out, like an iPhone, and resume when it goes back in. When off, playback continues in the other bud. With both buds out, media stops and does not resume.",
                 self.pause_when_one_removed,
                 Message::PauseWhenOneRemovedChanged,
             ),

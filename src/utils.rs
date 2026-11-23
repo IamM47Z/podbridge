@@ -218,7 +218,7 @@ impl Default for AppSettings {
             hires_mic_pause_convo: true,
             a2dp_reset: true,
             audio_off_when_not_wearing: true,
-            pause_when_one_removed: false,
+            pause_when_one_removed: true,
             convo_restore_pending: false,
             conv_volume_restore: None,
         }

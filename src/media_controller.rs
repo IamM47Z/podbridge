@@ -400,6 +400,9 @@ impl MediaController {
                 debug!("Nothing playing on the AirPods; not pausing");
             }
         }
+        if actions.forget_paused {
+            self.state.lock().await.paused_by_app_services.clear();
+        }
         if actions.activate_a2dp {
             self.activate_a2dp_profile().await;
         }
@@ -1329,15 +1332,18 @@ struct EarActions {
     resume: bool,
     activate_a2dp: bool,
     deactivate_a2dp: bool,
+    /// Drop what a one-bud pause would resume.
+    forget_paused: bool,
 }
 
 /// What an ear-detection change should do. `old`/`new` are per-bud "in ear"
 /// flags; `old` is empty on the first report after connecting.
 ///
-/// - 0 buds in (from >= 1): pause media; switch audio away if
-///   `audio_off_when_not_wearing` (debounced by the caller).
-/// - >= 1 bud in (from 0): bring the AirPods' audio back and resume what we paused.
-/// - 2 -> 1 / 1 -> 2: keep playing, unless `pause_when_one_removed`.
+/// Follows Apple's rules (Apple Support 108764):
+/// - 0 buds in (from >= 1): pause media and forget it, so it never resumes;
+///   switch audio away if `audio_off_when_not_wearing` (debounced by the caller).
+/// - >= 1 bud in (from 0): bring the AirPods' audio back, without resuming.
+/// - 2 -> 1 / 1 -> 2: pause and resume if `pause_when_one_removed`.
 fn ear_actions(
     old: &[bool],
     new: &[bool],
@@ -1352,6 +1358,7 @@ fn ear_actions(
     if new_in == 0 {
         if old_in > 0 {
             a.pause = true;
+            a.forget_paused = true;
             a.deactivate_a2dp = audio_off_when_not_wearing;
         } else if first_report {
             // Connected while not worn (e.g. buds on the desk): don't grab audio.
@@ -1364,7 +1371,6 @@ fn ear_actions(
         // while BlueZ is still setting the card up.
         if !first_report {
             a.activate_a2dp = true;
-            a.resume = true;
         }
     } else if new_in < old_in {
         a.pause = pause_when_one_removed;
@@ -1383,9 +1389,23 @@ mod tests {
     const NONE: [bool; 2] = [false, false];
 
     #[test]
-    fn one_bud_out_keeps_playing_by_default() {
+    fn one_bud_out_keeps_playing_when_opted_out() {
         assert_eq!(ear_actions(&BOTH, &ONE, true, false), EarActions::default());
         assert_eq!(ear_actions(&ONE, &BOTH, true, false), EarActions::default());
+    }
+
+    #[test]
+    fn one_bud_out_pauses_by_default() {
+        assert!(crate::utils::AppSettings::default().pause_when_one_removed);
+    }
+
+    #[test]
+    fn both_out_forgets_what_to_resume() {
+        // Apple: with both buds out playback stops and does not resume.
+        for old in [BOTH, ONE] {
+            assert!(ear_actions(&old, &NONE, true, true).forget_paused);
+        }
+        assert!(!ear_actions(&BOTH, &ONE, true, true).forget_paused);
     }
 
     #[test]
@@ -1406,10 +1426,12 @@ mod tests {
     }
 
     #[test]
-    fn bud_back_in_restores_audio_and_resumes() {
+    fn bud_back_in_after_both_out_restores_audio_without_resuming() {
         for new in [ONE, BOTH] {
-            let a = ear_actions(&NONE, &new, true, false);
-            assert!(a.activate_a2dp && a.resume && !a.pause);
+            for pause_one in [false, true] {
+                let a = ear_actions(&NONE, &new, true, pause_one);
+                assert!(a.activate_a2dp && !a.resume && !a.pause);
+            }
         }
     }
 
