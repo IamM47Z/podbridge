@@ -495,7 +495,7 @@ fn setting_toggle<'a>(
 }
 
 /// A setting with a few named values, shown once the AirPods report it. A
-/// value no client documents shows as no selection.
+/// value no client documents shows as the Android client's fallback.
 fn setting_picker<'a>(
     mac: &str,
     title: &'a str,
@@ -504,7 +504,7 @@ fn setting_picker<'a>(
     choices: &'static [Choice],
     value: Option<u8>,
 ) -> Option<Element<'a, Message>> {
-    let selected = controls::find_choice(choices, value?);
+    let selected = Some(controls::find_choice(choices, value?));
     let mac = mac.to_string();
     Some(
         row![

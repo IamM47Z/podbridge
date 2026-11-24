@@ -20,6 +20,8 @@ pub fn is_on(value: &[u8]) -> bool {
 }
 
 /// One entry of a settings picker: the byte the AirPods use and its name.
+/// Each list starts with the entry the Android client shows for a value it
+/// does not know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choice {
     pub value: u8,
@@ -64,9 +66,14 @@ pub const MIC_MODES: [Choice; 3] = [
     choice(0x01, "Always Right"),
 ];
 
-/// The choice the AirPods reported; None for a value no client documents.
-pub fn find_choice(choices: &[Choice], value: u8) -> Option<Choice> {
-    choices.iter().find(|c| c.value == value).copied()
+/// The choice to show for a reported value. A value no client documents
+/// shows as the first choice, the one the Android client falls back to.
+pub fn find_choice(choices: &[Choice], value: u8) -> Choice {
+    choices
+        .iter()
+        .find(|c| c.value == value)
+        .unwrap_or(&choices[0])
+        .to_owned()
 }
 
 /// Settings some AirPods never report, such as AirPods Pro 2 with ear
@@ -122,35 +129,27 @@ mod tests {
 
     #[test]
     fn microphone_values_follow_the_android_client() {
-        assert_eq!(find_choice(&MIC_MODES, 0x00).unwrap().name, "Automatic");
-        assert_eq!(find_choice(&MIC_MODES, 0x01).unwrap().name, "Always Right");
-        assert_eq!(find_choice(&MIC_MODES, 0x02).unwrap().name, "Always Left");
-        assert_eq!(find_choice(&MIC_MODES, 0x03), None);
+        assert_eq!(find_choice(&MIC_MODES, 0x00).name, "Automatic");
+        assert_eq!(find_choice(&MIC_MODES, 0x01).name, "Always Right");
+        assert_eq!(find_choice(&MIC_MODES, 0x02).name, "Always Left");
     }
 
     #[test]
     fn reported_values_map_to_their_choice() {
-        assert_eq!(find_choice(&PRESS_SPEEDS, 0x00).unwrap().name, "Default");
-        assert_eq!(find_choice(&PRESS_SPEEDS, 0x02).unwrap().name, "Slowest");
-        assert_eq!(
-            find_choice(&PRESS_AND_HOLD_DURATIONS, 0x01).unwrap().name,
-            "Slower"
-        );
-        assert_eq!(
-            find_choice(&VOLUME_SWIPE_INTERVALS, 0x01).unwrap().name,
-            "Default"
-        );
-        assert_eq!(
-            find_choice(&VOLUME_SWIPE_INTERVALS, 0x03).unwrap().name,
-            "Longest"
-        );
+        assert_eq!(find_choice(&PRESS_SPEEDS, 0x00).name, "Default");
+        assert_eq!(find_choice(&PRESS_SPEEDS, 0x02).name, "Slowest");
+        assert_eq!(find_choice(&PRESS_AND_HOLD_DURATIONS, 0x01).name, "Slower");
+        assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x01).name, "Default");
+        assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x03).name, "Longest");
     }
 
     #[test]
-    fn undocumented_values_have_no_choice() {
-        assert_eq!(find_choice(&PRESS_SPEEDS, 0x03), None);
-        // The swipe interval starts at 1: 0 is not one of its values.
-        assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x00), None);
+    fn undocumented_values_show_the_android_fallback() {
+        assert_eq!(find_choice(&PRESS_SPEEDS, 0x03).name, "Default");
+        // AirPods Pro 2 report a swipe interval of 0, which is not one of its
+        // values; Android shows "Default" (1) for it.
+        assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x00).value, 0x01);
+        assert_eq!(find_choice(&MIC_MODES, 0x03).name, "Automatic");
     }
 
     #[test]
@@ -163,7 +162,7 @@ mod tests {
             stored_default(ControlCommandIdentifiers::MicMode),
             Some(0x00)
         );
-        assert_eq!(find_choice(&MIC_MODES, 0x00).unwrap().name, "Automatic");
+        assert_eq!(find_choice(&MIC_MODES, 0x00).name, "Automatic");
     }
 
     #[test]
