@@ -66,7 +66,7 @@ pub enum Section {
 }
 
 impl Section {
-    #[cfg(test)]
+    #[cfg(any(test, debug_assertions))]
     pub const ALL: [Section; 8] = [
         Section::Audio,
         Section::PressAndHold,

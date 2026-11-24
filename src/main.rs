@@ -79,6 +79,11 @@ fn main() -> iced::Result {
     }
     env_logger::init();
 
+    #[cfg(debug_assertions)]
+    if env::var_os(ui::window::preview::ENV).is_some() {
+        return ui::window::preview::run();
+    }
+
     // Single instance: two copies fight over the AirPodsHiRes mic module (each unloads the
     // other's as stale), so a second launch asks the running one to open its window and exits.
     let Ok(_instance_lock) = acquire_instance_lock(args.start_minimized) else {

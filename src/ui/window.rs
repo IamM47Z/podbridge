@@ -18,6 +18,8 @@ mod actions;
 mod add_device;
 mod bluetooth;
 mod content;
+#[cfg(debug_assertions)]
+pub mod preview;
 mod settings;
 mod sidebar;
 
