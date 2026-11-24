@@ -169,7 +169,8 @@ fn listening_mode_section<'a>(
 }
 
 /// Which listening modes a stem press and hold cycles through. Off is listed
-/// only while the AirPods allow it. Shown once the AirPods report the setting.
+/// only while the AirPods allow it. Shown while they are connected, with the
+/// stored choice or the default until they report it.
 fn press_and_hold_row<'a>(
     mac: &str,
     state: &'a AirPodsState,

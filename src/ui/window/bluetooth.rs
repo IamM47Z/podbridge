@@ -5,6 +5,7 @@ use crate::bluetooth::aacp::{AACPEvent, ControlCommandIdentifiers, ControlComman
 use crate::devices::enums::{
     AirPodsNoiseControlMode, AirPodsState, DeviceState, DeviceType, NothingAncMode, NothingState,
 };
+use crate::devices::press_and_hold;
 use crate::ui::messages::BluetoothUIMessage;
 use iced::widget::combo_box;
 use iced::{Task, window};
@@ -186,11 +187,17 @@ impl App {
         for status in statuses {
             airpods.record_setting(status.identifier, &status.value);
         }
-        let stored = crate::utils::AppSettings::load()
+        let settings = crate::utils::AppSettings::load();
+        let stored = settings
             .stored_controls
-            .remove(mac)
+            .get(mac)
+            .cloned()
             .unwrap_or_default();
         airpods.fill_unreported(statuses, &stored);
+        airpods.press_and_hold_modes = Some(press_and_hold::shown_mask(
+            airpods.press_and_hold_modes,
+            settings.press_and_hold_modes.get(mac).copied(),
+        ));
         airpods
     }
 

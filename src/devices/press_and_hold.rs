@@ -15,6 +15,18 @@ pub const MODES: [(u8, &str); 4] = [
     (ADAPTIVE, "Adaptive"),
 ];
 
+/// What the page shows before any report or stored choice: Noise
+/// Cancellation and Transparency. Apple's support page 108918 does not name a
+/// default cycle. These two are the modes every AirPods with noise control
+/// offers.
+pub const DEFAULT: u8 = NOISE_CANCELLATION | TRANSPARENCY;
+
+/// The mask to show: the AirPods' report, else the choice stored for this
+/// device, else DEFAULT. Some AirPods (Pro 2, A3064) never report 0x1A.
+pub fn shown_mask(reported: Option<u8>, stored: Option<u8>) -> u8 {
+    reported.or(stored).unwrap_or(DEFAULT)
+}
+
 /// Flip one mode. The cycle needs at least two modes, so turning one off
 /// that would leave fewer is refused and the mask comes back unchanged.
 /// Off counts only while it is allowed: hidden, it cannot be one of the two.
@@ -31,6 +43,18 @@ pub fn toggle(mask: u8, mode: u8, allow_off: bool) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_report_beats_the_stored_choice() {
+        assert_eq!(shown_mask(Some(0x0B), Some(0x06)), 0x0B);
+    }
+
+    #[test]
+    fn unreported_modes_show_the_stored_choice_else_the_default() {
+        assert_eq!(shown_mask(None, Some(0x0D)), 0x0D);
+        assert_eq!(shown_mask(None, None), 0x06);
+        assert_eq!(DEFAULT, NOISE_CANCELLATION | TRANSPARENCY);
+    }
 
     #[test]
     fn modes_turn_on_and_off() {
