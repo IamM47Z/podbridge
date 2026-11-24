@@ -255,6 +255,17 @@ fn audio_section<'a>(
                 divider(),
                 conversation_awareness_row(mac, state, aacp_manager, pause_convo)
             ]
+            .extend(
+                setting_toggle(
+                    mac,
+                    "Pause Media When Falling Asleep",
+                    "AirPods pause your media when they detect that you have fallen asleep.",
+                    ControlCommandIdentifiers::SleepDetectionConfig,
+                    state.sleep_detection,
+                )
+                .into_iter()
+                .flat_map(|row| [divider(), row]),
+            )
             .spacing(4)
             .padding(8)
         )

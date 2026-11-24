@@ -180,6 +180,7 @@ impl App {
             press_and_hold_duration: None,
             ear_detection: None,
             mic_mode: None,
+            sleep_detection: None,
             hires_mic_enabled: self.hires_mic_enabled,
         };
         for status in statuses {

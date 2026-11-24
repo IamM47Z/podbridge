@@ -77,6 +77,9 @@ pub struct AirPodsState {
     /// controls::MIC_MODES value.
     pub ear_detection: Option<u8>,
     pub mic_mode: Option<u8>,
+    /// Pause media when falling asleep (0x35), controls::ON or OFF; None on
+    /// models that do not report it.
+    pub sleep_detection: Option<u8>,
     /// Local capture state of the proprietary hi-res microphone (UI-driven).
     pub hires_mic_enabled: bool,
     pub battery: Vec<BatteryInfo>,
@@ -96,6 +99,7 @@ impl AirPodsState {
             ControlCommandIdentifiers::ClickHoldInterval => &mut self.press_and_hold_duration,
             ControlCommandIdentifiers::EarDetectionConfig => &mut self.ear_detection,
             ControlCommandIdentifiers::MicMode => &mut self.mic_mode,
+            ControlCommandIdentifiers::SleepDetectionConfig => &mut self.sleep_detection,
             _ => return false,
         };
         *slot = value.first().copied();
@@ -205,6 +209,7 @@ mod tests {
             press_and_hold_duration: None,
             ear_detection: None,
             mic_mode: None,
+            sleep_detection: None,
             hires_mic_enabled: false,
             battery: Vec::new(),
         }
@@ -223,6 +228,7 @@ mod tests {
             (ControlCommandIdentifiers::AutoAncStrength, 40),
             (ControlCommandIdentifiers::EarDetectionConfig, 0x02),
             (ControlCommandIdentifiers::MicMode, 0x01),
+            (ControlCommandIdentifiers::SleepDetectionConfig, 0x01),
         ] {
             assert!(state.record_setting(id, &[value, 0x50]));
         }
@@ -235,6 +241,7 @@ mod tests {
         assert_eq!(state.adaptive_strength, Some(40));
         assert_eq!(state.ear_detection, Some(0x02));
         assert_eq!(state.mic_mode, Some(0x01));
+        assert_eq!(state.sleep_detection, Some(0x01));
     }
 
     #[test]
