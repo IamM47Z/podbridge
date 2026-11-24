@@ -34,6 +34,8 @@ const NOTHING_MAC: &str = "02:00:00:00:00:02";
 /// points the XDG config and data folders at a fresh temp dir first.
 pub fn run() -> iced::Result {
     let dir = std::env::temp_dir().join(format!("podbridge-preview-{}", std::process::id()));
+    // A folder left by an earlier run with the same PID would not be fresh.
+    let _ = std::fs::remove_dir_all(&dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         eprintln!("{ENV}: could not create {}: {e}", dir.display());
         std::process::exit(2);
