@@ -965,18 +965,18 @@ mod tests {
     async fn short_connected_devices_packet_is_rejected() {
         let manager = AACPManager::new();
         for extra in 0..2 {
-            // opcode, 0x00, count = 1, then 8 + `extra` bytes: one or two
-            // short of the 10 the entry needs (it starts at offset 5).
+            // opcode, 0x00, 0x01, 0x00, count = 1, then 7 + `extra` bytes: one or
+            // two short of the 8 the entry needs (it starts at offset 5).
             let mut packet = HEADER_BYTES.to_vec();
-            packet.extend_from_slice(&[opcodes::CONNECTED_DEVICES, 0x00, 0x01]);
-            packet.extend(std::iter::repeat_n(0xAA, 8 + extra));
+            packet.extend_from_slice(&[opcodes::CONNECTED_DEVICES, 0x00, 0x01, 0x00, 0x01]);
+            packet.extend(std::iter::repeat_n(0xAA, 6 + extra));
             manager.receive_packet(&packet).await;
             assert!(manager.state.lock().await.connected_devices.is_empty());
         }
         // A complete one is still accepted.
         let mut packet = HEADER_BYTES.to_vec();
-        packet.extend_from_slice(&[opcodes::CONNECTED_DEVICES, 0x00, 0x01]);
-        packet.extend(std::iter::repeat_n(0xAA, 10));
+        packet.extend_from_slice(&[opcodes::CONNECTED_DEVICES, 0x00, 0x01, 0x00, 0x01]);
+        packet.extend(std::iter::repeat_n(0xAA, 8));
         manager.receive_packet(&packet).await;
         assert_eq!(manager.state.lock().await.connected_devices.len(), 1);
     }
@@ -1134,7 +1134,7 @@ mod tests {
         // Connected devices.
         manager
             .receive_packet(&frame(&[
-                0x2E, 0x00, 0x01, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x07, 0x08,
+                0x2E, 0x00, 0x01, 0x00, 0x01, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x07, 0x08,
             ]))
             .await;
         assert_eq!(

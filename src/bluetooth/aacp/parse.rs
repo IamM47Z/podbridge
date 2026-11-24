@@ -280,11 +280,11 @@ pub fn parse(packet: &[u8]) -> Result<Packet, ParseError> {
             Ok(Packet::AudioSource(AudioSource { mac, r#type }))
         }
         opcodes::CONNECTED_DEVICES => {
-            if payload.len() < 3 {
+            if payload.len() < 5 {
                 return truncated;
             }
-            let count = payload[2] as usize;
-            // Entries start at payload[5]; checking from 3 let a short packet index past the end.
+            let count = payload[4] as usize;
+            // Entries start at payload[5], right after the count.
             if payload.len() < 5 + count * 8 {
                 return Err(ParseError::LengthMismatch { opcode });
             }
@@ -705,52 +705,62 @@ mod tests {
 
     #[test]
     fn connected_devices() {
+        // Packets captured from AirPods Pro, payload after the 04000400 header.
+        let dev = |mac: &str, info1, info2| ConnectedDevice {
+            mac: mac.to_string(),
+            info1,
+            info2,
+            r#type: None,
+        };
+        let one = hex::decode("2e000100010200000000010102").unwrap();
         assert_eq!(
-            parse_body(&[
-                0x2E, 0x00, 0x02, 0xEE, 0xEE, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x01, 0x02, 0xAA,
-                0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x03, 0x04,
-            ]),
+            parse_body(&one),
+            Ok(Packet::ConnectedDevices(vec![dev(
+                "02:00:00:00:00:01",
+                0x01,
+                0x02
+            )]))
+        );
+        let two = hex::decode("2e0001000202000000000201040200000000010002").unwrap();
+        assert_eq!(
+            parse_body(&two),
             Ok(Packet::ConnectedDevices(vec![
-                ConnectedDevice {
-                    mac: "11:22:33:44:55:66".to_string(),
-                    info1: 0x01,
-                    info2: 0x02,
-                    r#type: None,
-                },
-                ConnectedDevice {
-                    mac: "AA:BB:CC:DD:EE:FF".to_string(),
-                    info1: 0x03,
-                    info2: 0x04,
-                    r#type: None,
-                },
+                dev("02:00:00:00:00:02", 0x01, 0x04),
+                dev("02:00:00:00:00:01", 0x00, 0x02),
+            ]))
+        );
+        let three =
+            hex::decode("2e00010003020000000002000502000000000300010200000000010202").unwrap();
+        assert_eq!(
+            parse_body(&three),
+            Ok(Packet::ConnectedDevices(vec![
+                dev("02:00:00:00:00:02", 0x00, 0x05),
+                dev("02:00:00:00:00:03", 0x00, 0x01),
+                dev("02:00:00:00:00:01", 0x02, 0x02),
             ]))
         );
         assert_eq!(
-            parse_body(&[0x2E, 0x00, 0x00, 0x00, 0x00]),
+            parse_body(&[0x2E, 0x00, 0x01, 0x00, 0x00]),
             Ok(Packet::ConnectedDevices(vec![]))
         );
-        // Even with no entries, the two bytes before them are required.
+        // The count byte itself is required.
         assert_eq!(
-            parse_body(&[0x2E, 0x00, 0x00]),
-            Err(ParseError::LengthMismatch {
-                opcode: opcodes::CONNECTED_DEVICES
-            })
-        );
-        assert_eq!(
-            parse_body(&[0x2E, 0x00]),
+            parse_body(&[0x2E, 0x00, 0x01, 0x00]),
             Err(ParseError::Truncated {
                 opcode: opcodes::CONNECTED_DEVICES
             })
         );
-        // One entry needs 5 + 8 payload bytes.
-        let mut body = vec![0x2E, 0x00, 0x01];
-        body.extend([0xAA; 9]);
-        assert_eq!(
-            parse_body(&body),
-            Err(ParseError::LengthMismatch {
-                opcode: opcodes::CONNECTED_DEVICES
-            })
-        );
+        // One entry needs 5 + 8 payload bytes; every shorter packet is an error.
+        for len in 5..13 {
+            let mut body = vec![0x2E, 0x00, 0x01, 0x00, 0x01];
+            body.resize(len, 0xAA);
+            assert_eq!(
+                parse_body(&body),
+                Err(ParseError::LengthMismatch {
+                    opcode: opcodes::CONNECTED_DEVICES
+                })
+            );
+        }
     }
 
     #[test]
