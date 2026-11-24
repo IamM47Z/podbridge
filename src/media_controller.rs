@@ -411,6 +411,16 @@ impl MediaController {
         service.starts_with("org.mpris.MediaPlayer2.kdeconnect.mpris_")
     }
 
+    /// The AirPods' Automatic Ear Detection setting. While it is off, taking a
+    /// bud out or putting it in neither pauses, resumes nor moves the audio.
+    pub async fn set_ear_detection_enabled(&self, enabled: bool) {
+        info!(
+            "Automatic ear detection {}",
+            if enabled { "on" } else { "off" }
+        );
+        self.state.lock().await.ear_detection_enabled = enabled;
+    }
+
     /// `other_device_active`: another device (iPhone) is currently playing or
     /// in a call on the AirPods; then a bud going in doesn't pull audio here.
     pub async fn handle_ear_detection(

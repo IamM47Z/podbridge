@@ -13,6 +13,12 @@ pub fn toggle_value(on: bool) -> u8 {
     if on { ON } else { OFF }
 }
 
+/// Whether a reported toggle value is on. The Android client reads the first
+/// byte and counts only ON as on.
+pub fn is_on(value: &[u8]) -> bool {
+    value.first() == Some(&ON)
+}
+
 /// One entry of a settings picker: the byte the AirPods use and its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choice {
@@ -51,6 +57,13 @@ pub const VOLUME_SWIPE_INTERVALS: [Choice; 3] = [
     choice(0x03, "Longest"),
 ];
 
+/// Microphone (0x01): which AirPod's microphone is used.
+pub const MIC_MODES: [Choice; 3] = [
+    choice(0x00, "Automatic"),
+    choice(0x02, "Always Left"),
+    choice(0x01, "Always Right"),
+];
+
 /// The choice the AirPods reported; None for a value no client documents.
 pub fn find_choice(choices: &[Choice], value: u8) -> Option<Choice> {
     choices.iter().find(|c| c.value == value).copied()
@@ -77,6 +90,23 @@ mod tests {
     fn toggles_use_one_for_on_and_two_for_off() {
         assert_eq!(toggle_value(true), 0x01);
         assert_eq!(toggle_value(false), 0x02);
+    }
+
+    #[test]
+    fn only_a_first_byte_of_one_is_on() {
+        assert!(is_on(&[0x01]));
+        assert!(is_on(&[0x01, 0x00]));
+        assert!(!is_on(&[0x02]));
+        assert!(!is_on(&[0x00]));
+        assert!(!is_on(&[]));
+    }
+
+    #[test]
+    fn microphone_values_follow_the_android_client() {
+        assert_eq!(find_choice(&MIC_MODES, 0x00).unwrap().name, "Automatic");
+        assert_eq!(find_choice(&MIC_MODES, 0x01).unwrap().name, "Always Right");
+        assert_eq!(find_choice(&MIC_MODES, 0x02).unwrap().name, "Always Left");
+        assert_eq!(find_choice(&MIC_MODES, 0x03), None);
     }
 
     #[test]

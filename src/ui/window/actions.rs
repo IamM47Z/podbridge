@@ -144,8 +144,11 @@ impl App {
         Task::perform(
             async move {
                 let payload = controls::payload(identifier, value);
-                if let Err(e) = aacp.send_control_command(identifier, &payload).await {
-                    error!("Failed to send {:?}: {}", identifier, e);
+                match aacp.send_control_command(identifier, &payload).await {
+                    // Whether the AirPods echo each setting is unverified;
+                    // record it so the backend acts on it either way.
+                    Ok(()) => aacp.record_control_status(identifier, value).await,
+                    Err(e) => error!("Failed to send {:?}: {}", identifier, e),
                 }
             },
             |_| Message::Bluetooth(BluetoothUIMessage::NoOp),

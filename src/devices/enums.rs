@@ -72,6 +72,11 @@ pub struct AirPodsState {
     pub volume_swipe_interval: Option<u8>,
     pub press_speed: Option<u8>,
     pub press_and_hold_duration: Option<u8>,
+    /// Connection settings, as the AirPods report them; None until they do.
+    /// Ear detection holds controls::ON or OFF, the microphone a
+    /// controls::MIC_MODES value.
+    pub ear_detection: Option<u8>,
+    pub mic_mode: Option<u8>,
     /// Local capture state of the proprietary hi-res microphone (UI-driven).
     pub hires_mic_enabled: bool,
     pub battery: Vec<BatteryInfo>,
@@ -89,6 +94,8 @@ impl AirPodsState {
             ControlCommandIdentifiers::VolumeSwipeInterval => &mut self.volume_swipe_interval,
             ControlCommandIdentifiers::DoubleClickInterval => &mut self.press_speed,
             ControlCommandIdentifiers::ClickHoldInterval => &mut self.press_and_hold_duration,
+            ControlCommandIdentifiers::EarDetectionConfig => &mut self.ear_detection,
+            ControlCommandIdentifiers::MicMode => &mut self.mic_mode,
             _ => return false,
         };
         *slot = value.first().copied();
@@ -196,6 +203,8 @@ mod tests {
             volume_swipe_interval: None,
             press_speed: None,
             press_and_hold_duration: None,
+            ear_detection: None,
+            mic_mode: None,
             hires_mic_enabled: false,
             battery: Vec::new(),
         }
@@ -212,6 +221,8 @@ mod tests {
             (ControlCommandIdentifiers::DoubleClickInterval, 0x01),
             (ControlCommandIdentifiers::ClickHoldInterval, 0x02),
             (ControlCommandIdentifiers::AutoAncStrength, 40),
+            (ControlCommandIdentifiers::EarDetectionConfig, 0x02),
+            (ControlCommandIdentifiers::MicMode, 0x01),
         ] {
             assert!(state.record_setting(id, &[value, 0x50]));
         }
@@ -222,6 +233,8 @@ mod tests {
         assert_eq!(state.press_speed, Some(0x01));
         assert_eq!(state.press_and_hold_duration, Some(0x02));
         assert_eq!(state.adaptive_strength, Some(40));
+        assert_eq!(state.ear_detection, Some(0x02));
+        assert_eq!(state.mic_mode, Some(0x01));
     }
 
     #[test]

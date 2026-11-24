@@ -1,5 +1,6 @@
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::bluetooth::aacp::{AACPEvent, AACPManager, AirPodsLEKeys, ProximityKeyType};
+use crate::devices::controls;
 use crate::devices::low_battery::{LowBatteryAlerts, alert_body, notify};
 use crate::media_controller::MediaController;
 use crate::ui::messages::BluetoothUIMessage;
@@ -82,6 +83,7 @@ impl AirPodsDevice {
 
         spawn_tray_routing(&aacp_manager, &tray_handle).await;
         spawn_ownership_watch(&aacp_manager, media_controller.clone()).await;
+        spawn_ear_detection_watch(&aacp_manager, media_controller.clone()).await;
 
         let events = EventLoop {
             aacp: aacp_manager.clone(),
@@ -309,6 +311,27 @@ async fn spawn_ownership_watch(
                 controller.pause_all_media().await;
                 controller.deactivate_a2dp_profile().await;
             }
+        }
+    });
+}
+
+/// Follow the AirPods' Automatic Ear Detection setting (0x0A), reported or
+/// set from the device page, in podbridge's own ear-based pause and resume.
+async fn spawn_ear_detection_watch(
+    aacp_manager: &AACPManager,
+    media_controller: Arc<Mutex<MediaController>>,
+) {
+    let (value_tx, mut value_rx) = tokio::sync::mpsc::unbounded_channel();
+    aacp_manager
+        .subscribe_to_control_command(ControlCommandIdentifiers::EarDetectionConfig, value_tx)
+        .await;
+    spawn_for_connection(aacp_manager, async move {
+        while let Some(value) = value_rx.recv().await {
+            media_controller
+                .lock()
+                .await
+                .set_ear_detection_enabled(controls::is_on(&value))
+                .await;
         }
     });
 }

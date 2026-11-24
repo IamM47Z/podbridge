@@ -237,7 +237,8 @@ impl AACPManager {
     }
 
     /// Record a control value the AirPods do not echo back: store it in the
-    /// status list and push it to the event channel, as a report would.
+    /// status list and pass it to the subscribers and the event channel, as a
+    /// report would.
     pub async fn record_control_status(&self, identifier: ControlCommandIdentifiers, value: u8) {
         let mut state = self.state.lock().await;
         if let Some(existing) = state
@@ -253,6 +254,11 @@ impl AACPManager {
                     identifier,
                     value: vec![value],
                 });
+        }
+        if let Some(subscribers) = state.control_command_subscribers.get(&identifier) {
+            for sub in subscribers {
+                let _ = sub.send(vec![value]);
+            }
         }
         if let Some(ref tx) = state.event_tx {
             let _ = tx.send(AACPEvent::ControlCommand(ControlCommandStatus {
@@ -991,6 +997,27 @@ mod tests {
 
     /// Characterization: the state and event side effects of each handled
     /// opcode, pinned before the parser was split out of receive_packet.
+    #[tokio::test]
+    async fn recorded_status_reaches_subscribers_like_a_report() {
+        use super::*;
+        let (manager, mut rx) = manager_with_events().await;
+        let (sub_tx, mut sub_rx) = tokio::sync::mpsc::unbounded_channel();
+        manager
+            .subscribe_to_control_command(ControlCommandIdentifiers::EarDetectionConfig, sub_tx)
+            .await;
+        manager
+            .record_control_status(ControlCommandIdentifiers::EarDetectionConfig, 0x02)
+            .await;
+        assert_eq!(sub_rx.try_recv().unwrap(), vec![0x02]);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AACPEvent::ControlCommand(ControlCommandStatus {
+                identifier: ControlCommandIdentifiers::EarDetectionConfig,
+                value,
+            })) if value == vec![0x02]
+        ));
+    }
+
     #[tokio::test]
     async fn receive_packet_side_effects() {
         use super::*;

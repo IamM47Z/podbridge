@@ -40,9 +40,12 @@ pub fn airpods_view<'a>(
             Space::new().height(Length::from(20)),
             audio_section(mac, state, &aacp_manager, pause_convo),
             Space::new().height(Length::from(20)),
-            off_listening_mode_section(mac, state, &aacp_manager),
-            Space::new().height(Length::from(20)),
         ]
+        .extend(connection_section(mac, state))
+        .extend([
+            off_listening_mode_section(mac, state, &aacp_manager).into(),
+            Space::new().height(Length::from(20)).into(),
+        ])
         .extend(accessibility_section(mac, state))
         .extend([
             hires_mic_section(mac, state, &aacp_manager).into(),
@@ -361,10 +364,32 @@ fn off_listening_mode_section<'a>(
     .style(style::card)
 }
 
+/// Ear detection and microphone, each shown once the AirPods report it.
+fn connection_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
+    let rows = [
+        setting_toggle(
+            mac,
+            "Automatic Ear Detection",
+            "Plays audio when AirPods are in your ears and pauses it when you take them out.",
+            ControlCommandIdentifiers::EarDetectionConfig,
+            state.ear_detection,
+        ),
+        setting_picker(
+            mac,
+            "Microphone",
+            "Choose which AirPod's microphone is used.",
+            ControlCommandIdentifiers::MicMode,
+            &controls::MIC_MODES,
+            state.mic_mode,
+        ),
+    ];
+    settings_section("Connection", rows.into_iter().flatten().collect())
+}
+
 /// Apple's AirPods accessibility settings. Each row shows once the AirPods
 /// report it. With none reported, the section is left out.
 fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
-    let rows: Vec<Element<'a, Message>> = [
+    let rows = [
         setting_toggle(
             mac,
             "Noise Cancellation with One AirPod",
@@ -404,10 +429,16 @@ fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a,
             &controls::VOLUME_SWIPE_INTERVALS,
             state.volume_swipe_interval,
         ),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    ];
+    settings_section("Accessibility", rows.into_iter().flatten().collect())
+}
+
+/// A titled card of settings rows split by dividers, then a gap; nothing
+/// when no row is shown.
+fn settings_section<'a>(
+    title: &'a str,
+    rows: Vec<Element<'a, Message>>,
+) -> Vec<Element<'a, Message>> {
     if rows.is_empty() {
         return Vec::new();
     }
@@ -419,7 +450,7 @@ fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a,
         card = card.push(row);
     }
     vec![
-        container(text("Accessibility").size(18).style(style::text_accent))
+        container(text(title).size(18).style(style::text_accent))
             .padding(Padding::from([5.0, 18.0]))
             .into(),
         container(card)

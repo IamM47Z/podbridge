@@ -178,6 +178,8 @@ impl App {
             volume_swipe_interval: None,
             press_speed: None,
             press_and_hold_duration: None,
+            ear_detection: None,
+            mic_mode: None,
             hires_mic_enabled: self.hires_mic_enabled,
         };
         for status in statuses {
