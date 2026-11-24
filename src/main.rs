@@ -22,7 +22,7 @@ use dbus::blocking::stdintf::org_freedesktop_dbus::Properties;
 use dbus::message::MatchRule;
 use devices::airpods::AirPodsDevice;
 use ksni::TrayMethods;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::Arc;
@@ -323,7 +323,26 @@ impl Backend {
     }
 }
 
-/// Reacts to BlueZ device connection changes.
+/// The Device1 property change a signal reports, as far as setup cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceChange {
+    Connected,
+    Disconnected,
+    /// The service UUIDs changed without a connection change. Right after
+    /// pairing they resolve only after Connected turned true.
+    UuidsChanged,
+}
+
+fn device_change(connected: Option<bool>, uuids_changed: bool) -> Option<DeviceChange> {
+    match connected {
+        Some(true) => Some(DeviceChange::Connected),
+        Some(false) => Some(DeviceChange::Disconnected),
+        None if uuids_changed => Some(DeviceChange::UuidsChanged),
+        None => None,
+    }
+}
+
+/// Reacts to BlueZ device connection changes, and to UUIDs resolved late.
 struct ConnectionWatcher {
     backend: Backend,
 }
@@ -345,25 +364,38 @@ impl ConnectionWatcher {
         if iface != "org.bluez.Device1" {
             return;
         }
-        let Some(connected_var) = changed.get("Connected") else {
+        let change = device_change(
+            changed
+                .get("Connected")
+                .and_then(|v| v.0.as_ref().as_u64())
+                .map(|c| c != 0),
+            changed.contains_key("UUIDs"),
+        );
+        let Some(change) = change else {
             return;
         };
-        let Some(is_connected) = connected_var.0.as_ref().as_u64() else {
+        let proxy = conn.with_proxy("org.bluez", &path, std::time::Duration::from_millis(5000));
+        if change == DeviceChange::UuidsChanged
+            && !proxy
+                .get::<bool>("org.bluez.Device1", "Connected")
+                .unwrap_or(false)
+        {
             return;
-        };
-        let proxy = conn.with_proxy("org.bluez", path, std::time::Duration::from_millis(5000));
+        }
         let Ok(uuids) = proxy.get::<Vec<String>>("org.bluez.Device1", "UUIDs") else {
+            debug!("{}: could not read its UUIDs; ignoring the change", path);
             return;
         };
         let target_uuid = "74ec2172-0bad-4d01-8f77-997b2be0722a";
 
         let Ok(addr_str) = proxy.get::<String>("org.bluez.Device1", "Address") else {
+            debug!("{}: could not read its address; ignoring the change", path);
             return;
         };
         let Ok(addr) = addr_str.parse::<Address>() else {
             return;
         };
-        if is_connected == 0 {
+        if change == DeviceChange::Disconnected {
             if let Err(e) = self
                 .backend
                 .ui_tx
@@ -376,6 +408,9 @@ impl ConnectionWatcher {
         // Read the file on each connect: devices added in the UI since startup count.
         let (devices_list, managed_devices_mac) = load_managed_devices();
         if managed_devices_mac.contains(&addr_str) {
+            if change != DeviceChange::Connected {
+                return;
+            }
             info!("Managed device connected: {}, initializing", addr_str);
             if devices_list
                 .get(&addr_str)
@@ -387,12 +422,19 @@ impl ConnectionWatcher {
         }
 
         if !uuids.iter().any(|u| u.to_lowercase() == target_uuid) {
+            if change == DeviceChange::Connected {
+                // Right after pairing the UUIDs may not be resolved yet; their
+                // change comes as its own signal.
+                debug!(
+                    "{} connected without the AACP UUID (yet); not AirPods so far",
+                    addr_str
+                );
+            }
             return;
         }
         let name = proxy
             .get::<String>("org.bluez.Device1", "Name")
             .unwrap_or_else(|_| "Unknown".to_string());
-        info!("AirPods connected: {}, initializing", name);
         ensure_device_registered(&addr_str, &name, devices::enums::DeviceType::AirPods);
         let backend = self.backend.clone();
         tokio::spawn(async move {
@@ -403,6 +445,15 @@ impl ConnectionWatcher {
                 );
                 return;
             }
+            // A UUIDs change on AirPods that are already set up changes nothing.
+            if change == DeviceChange::UuidsChanged
+                && aacp_link_up(&backend.device_managers, &addr_str).await
+            {
+                end_setup(&backend.connecting, &addr_str);
+                debug!("{} UUIDs changed; already set up", addr_str);
+                return;
+            }
+            info!("AirPods connected: {}, initializing", name);
             close_stale_link(&backend.device_managers, &addr_str).await;
             let airpods_device = AirPodsDevice::new(
                 addr,
@@ -512,6 +563,16 @@ fn end_setup(connecting: &Connecting, mac: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(mac);
+}
+
+/// True if these AirPods have a live AACP link.
+async fn aacp_link_up(device_managers: &DeviceMap, mac: &str) -> bool {
+    device_managers
+        .read()
+        .await
+        .get(mac)
+        .and_then(|m| m.get_aacp())
+        .is_some_and(|aacp| aacp.is_connected())
 }
 
 /// BlueZ says the AirPods (re)connected, but our previous AACP link for them may
@@ -674,4 +735,27 @@ fn spawn_shutdown_handler(
         }
         std::process::exit(0);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_connection_change_wins_over_a_uuids_change() {
+        assert_eq!(
+            device_change(Some(true), true),
+            Some(DeviceChange::Connected)
+        );
+        assert_eq!(
+            device_change(Some(false), true),
+            Some(DeviceChange::Disconnected)
+        );
+    }
+
+    #[test]
+    fn uuids_resolved_after_pairing_count_as_a_change() {
+        assert_eq!(device_change(None, true), Some(DeviceChange::UuidsChanged));
+        assert_eq!(device_change(None, false), None);
+    }
 }
