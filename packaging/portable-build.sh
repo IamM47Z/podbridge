@@ -3,22 +3,24 @@
 # Distributions ship different FFmpeg sonames (Ubuntu 26.04 libavutil.so.60,
 # Arch libavutil.so.61), so FFmpeg is linked statically, and only the AAC
 # decoder that src/audio/eld.rs uses is built. The glibc floor is the build
-# host's, so the release runs on the oldest supported runner image.
+# host's: keep MAX_GLIBC at the glibc of release.yml's runner image.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
-# The minor version must match ffmpeg-sys-next's, whose bindings target it.
+# Keep the minor version at ffmpeg-sys-next's, the FFmpeg series that crate release supports.
 FFMPEG_VERSION=8.1.3
 FFMPEG_SHA256=7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
 MAX_GLIBC=2.39
 
 root="$PWD/target/ffmpeg"
 prefix="$root/dist"
-if [[ ! -f $prefix/lib/libavcodec.a ]]; then
+tarball="$root/ffmpeg-$FFMPEG_VERSION.tar.xz"
+if [[ ! -f $prefix/lib/libavcodec.a || ! -f $tarball ]]; then
   rm -rf "$root"
   mkdir -p "$root"
-  curl -fsSLo "$root/ffmpeg.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-  echo "$FFMPEG_SHA256  $root/ffmpeg.tar.xz" | sha256sum -c -
-  tar -xf "$root/ffmpeg.tar.xz" -C "$root"
+  curl -fsSLo "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+  echo "$FFMPEG_SHA256  $tarball" | sha256sum -c -
+  tar -xf "$tarball" -C "$root"
   (
     cd "$root/ffmpeg-$FFMPEG_VERSION"
     ./configure --prefix="$prefix" --enable-static --disable-shared --enable-pic \
@@ -31,6 +33,8 @@ if [[ ! -f $prefix/lib/libavcodec.a ]]; then
 fi
 
 # Only static archives sit in $prefix/lib, so the linker cannot pick a shared FFmpeg.
+# Cargo does not track FFMPEG_DIR, so a plain build's pkg-config link would be reused.
+cargo clean --release -p ffmpeg-sys-next
 FFMPEG_DIR="$prefix" cargo build --release --locked
 
 bin=target/release/podbridge

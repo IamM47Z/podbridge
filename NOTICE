@@ -18,12 +18,13 @@ Bundled fonts keep their own licenses:
   Bitstream, Arev glyphs (c) Tavmjong Bah, DejaVu changes in the public
   domain. See assets/font/DejaVu-LICENSE.txt.
 
-The release binary and AppImage contain the AAC decoder of FFmpeg 8.1,
-https://ffmpeg.org, licensed under the GNU Lesser General Public License
-v2.1 or later, see COPYING.LGPLv2.1. packaging/portable-build.sh fetches
-its source and builds it.
-
 Packages install these license files next to this NOTICE.
+
+The release tarball and AppImage contain the AAC decoder of FFmpeg 8.1,
+https://ffmpeg.org. It is licensed under the GNU Lesser General Public
+License v2.1 or later. Both ship that license as COPYING.LGPLv2.1. Each
+release also carries the FFmpeg source tarball it was built from.
+packaging/portable-build.sh fetches and builds that source.
 
 podbridge is distributed under the same license, the GNU Affero General
 Public License v3.0. See LICENSE.

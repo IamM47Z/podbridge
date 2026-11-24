@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   release:
-    # The oldest supported image sets the glibc floor of both artifacts.
+    # Its glibc 2.39 is the floor of both artifacts. Keep MAX_GLIBC in
+    # packaging/portable-build.sh equal to it.
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -70,6 +71,8 @@ jobs:
             target/ffmpeg/ffmpeg-*/COPYING.LGPLv2.1
           ARCH=x86_64 ./appimagetool --runtime-file runtime AppDir "dist/$APP-$GITHUB_REF_NAME-x86_64.AppImage"
 
+          # The binaries contain FFmpeg, so its source ships beside them (LGPL-2.1 section 6).
+          cp target/ffmpeg/ffmpeg-*.tar.xz dist/
           (cd dist && sha256sum -- * > SHA256SUMS)
 
       - name: Publish

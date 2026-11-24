@@ -14,7 +14,7 @@ Arch Linux: build `packaging/podbridge-git/PKGBUILD` with `makepkg -si`.
 Other distributions: download the binary or the AppImage from the
 [releases](https://github.com/IamM47Z/podbridge/releases). Both need glibc
 2.39 or later. The binary also needs D-Bus and the PulseAudio client library
-(`libpulse`); FFmpeg is built in.
+(`libpulse`). FFmpeg is built in.
 
 ## Build
 
@@ -24,6 +24,9 @@ files, and `clang`.
 ```sh
 cargo build --release
 ```
+
+`packaging/portable-build.sh` builds the release binary with a static FFmpeg.
+It also needs `nasm` and `curl`.
 
 CI rejects any rustc or clippy warning. Install [prek](https://github.com/j178/prek)
 and run `prek install` once to get the same checks locally: fmt and clippy on
