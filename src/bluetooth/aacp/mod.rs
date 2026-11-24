@@ -995,8 +995,6 @@ mod tests {
         (manager, rx)
     }
 
-    /// Characterization: the state and event side effects of each handled
-    /// opcode, pinned before the parser was split out of receive_packet.
     #[tokio::test]
     async fn recorded_status_reaches_subscribers_like_a_report() {
         use super::*;
@@ -1018,6 +1016,8 @@ mod tests {
         ));
     }
 
+    /// Characterization: the state and event side effects of each handled
+    /// opcode, pinned before the parser was split out of receive_packet.
     #[tokio::test]
     async fn receive_packet_side_effects() {
         use super::*;
