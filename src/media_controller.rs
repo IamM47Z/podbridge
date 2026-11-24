@@ -478,10 +478,16 @@ impl MediaController {
         if actions.pause {
             // Only pause if something is playing to the AirPods: taking them off
             // shouldn't pause music playing on the speakers or another headset.
-            if self.airpods_have_streams().await {
-                self.pause().await;
+            let paused = if self.airpods_have_streams().await {
+                self.pause().await
             } else {
                 debug!("Nothing playing on the AirPods; not pausing");
+                false
+            };
+            if !paused {
+                // Putting the bud back must resume only what this pause
+                // paused, not an older pause (e.g. a stem Play/Pause).
+                self.state.lock().await.paused_by_app_services.clear();
             }
         }
         if actions.forget_paused {
