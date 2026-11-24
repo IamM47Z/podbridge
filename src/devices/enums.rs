@@ -63,8 +63,8 @@ pub struct AirPodsState {
     /// the AirPods report it; None on models without it.
     pub adaptive_strength: Option<u8>,
     /// The press-and-hold listening modes bitmask (control command 0x1A). Set
-    /// at connect from the report, the stored choice or the default (see
-    /// press_and_hold::shown_mask).
+    /// at connect by press_and_hold::shown_mask. Later reports and toggles
+    /// replace it.
     pub press_and_hold_modes: Option<u8>,
     /// Accessibility settings, as the AirPods report them; each None until
     /// they do. Toggles hold controls::ON or OFF, pickers a controls::Choice

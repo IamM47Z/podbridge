@@ -53,7 +53,6 @@ mod tests {
     fn unreported_modes_show_the_stored_choice_else_the_default() {
         assert_eq!(shown_mask(None, Some(0x0D)), 0x0D);
         assert_eq!(shown_mask(None, None), 0x06);
-        assert_eq!(DEFAULT, NOISE_CANCELLATION | TRANSPARENCY);
     }
 
     #[test]
