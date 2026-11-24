@@ -302,6 +302,11 @@ impl App {
                 if self.window == Some(id) {
                     self.window = None;
                 }
+                // The preview has no tray to reopen the window from.
+                #[cfg(debug_assertions)]
+                if std::env::var_os(preview::ENV).is_some() {
+                    return iced::exit();
+                }
                 Task::none()
             }
             Message::Resized(event) => {

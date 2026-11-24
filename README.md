@@ -33,12 +33,11 @@ and run `prek install` once to get the same checks locally: fmt and clippy on
 commit, tests on push.
 
 To check the window's layout without AirPods, a debug build opens it on sample
-devices. Bluetooth, the tray and a running podbridge are left alone. The sample
-devices are written to the devices file, so point the XDG folders elsewhere:
+devices. Bluetooth, the tray and a running podbridge are left alone. Its
+settings and devices go to a fresh temp folder, never your real ones:
 
 ```sh
-dir=$(mktemp -d)
-XDG_CONFIG_HOME=$dir XDG_DATA_HOME=$dir PODBRIDGE_UI_PREVIEW=1 cargo run
+PODBRIDGE_UI_PREVIEW=1 cargo run
 ```
 
 Add `PODBRIDGE_UI_PREVIEW_SIZE=420x600` for the window size and

@@ -30,16 +30,19 @@ pub const ENV: &str = "PODBRIDGE_UI_PREVIEW";
 const AIRPODS_MAC: &str = "02:00:00:00:00:01";
 const NOTHING_MAC: &str = "02:00:00:00:00:02";
 
-/// Opens the preview window. It writes the sample devices to the devices
-/// file, so it refuses to run unless XDG_CONFIG_HOME and XDG_DATA_HOME point
-/// away from the real ones.
+/// Opens the preview window. It writes sample devices and settings, so it
+/// points the XDG config and data folders at a fresh temp dir first.
 pub fn run() -> iced::Result {
-    if std::env::var_os("XDG_CONFIG_HOME").is_none() || std::env::var_os("XDG_DATA_HOME").is_none()
-    {
-        eprintln!(
-            "{ENV} writes sample devices: set XDG_CONFIG_HOME and XDG_DATA_HOME to a temp dir"
-        );
+    let dir = std::env::temp_dir().join(format!("podbridge-preview-{}", std::process::id()));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("{ENV}: could not create {}: {e}", dir.display());
         std::process::exit(2);
+    }
+    eprintln!("{ENV}: settings and devices go to {}", dir.display());
+    // SAFETY: no other thread runs yet; main calls this before starting any.
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        std::env::set_var("XDG_DATA_HOME", &dir);
     }
     // The AACP manager keeps a handle to the runtime it was made in.
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
