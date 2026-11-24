@@ -440,7 +440,7 @@ impl ConnectionWatcher {
         tokio::spawn(async move {
             if !begin_setup(&backend.connecting, &addr_str) {
                 info!(
-                    "Already setting up {}; ignoring duplicate connect",
+                    "Already setting up {}; ignoring duplicate connect or UUIDs change",
                     addr_str
                 );
                 return;
