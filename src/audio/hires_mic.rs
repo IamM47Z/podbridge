@@ -182,8 +182,8 @@ pub struct HiResMic {
 
 impl HiResMic {
     // Make the shared virtual input available (see SharedMic) and spawn the
-    // activity monitor. When the monitor exits the input is kept (and parked
-    // later), or unloaded if the hi-res mic was turned off.
+    // activity monitor. When the monitor exits the input is kept for now (see
+    // release_mic), or unloaded if the hi-res mic was turned off.
     pub async fn start(aacp: &AACPManager, addr: String, status: MicStatus) -> Option<HiResMic> {
         // Name it after the AirPods exactly, like their output, so the desktop
         // shows one AirPods microphone.
@@ -808,7 +808,7 @@ impl Monitor {
         blocking(output::restore_wireplumber_mic).await;
 
         if self.aacp.hires_mic_enabled() {
-            // Disconnected (or podbridge exiting): keep the virtual mic.
+            // Disconnected (or podbridge exiting): keep the virtual mic for now.
             release_mic(&tokio::runtime::Handle::current());
         } else {
             blocking(remove_mic).await;
@@ -842,9 +842,12 @@ fn refresh_desktop_default_source(runtime: &tokio::runtime::Handle) {
 // Some apps crash when a microphone is added or removed while they record:
 // Discord's voice engine aborts (in libpulse, from its mic volume control) on
 // any source appearing or disappearing, even one it doesn't use. So the
-// virtual mic is created once and then kept: across disconnects, with no bud
-// worn, and across podbridge restarts (a new run adopts the loaded module). It
-// is only unloaded when the hi-res mic is turned off.
+// virtual mic is kept: across short disconnects, with no bud worn, and across
+// podbridge restarts (a new run adopts the loaded module). It is unloaded when
+// the hi-res mic is turned off, and when the AirPods stayed gone past
+// DISCONNECT_PARK_DELAY while no app records from any mic: a mic without
+// AirPods should not stay listed. The next connection creates it again, which
+// an app recording from another mic at that moment can still trip over.
 //
 // While the AirPods can't deliver mic audio the mic is "parked": another mic
 // becomes the default and apps pinned to ours are moved to it, then both are
@@ -1079,7 +1082,7 @@ fn unpark_mic() {
 }
 
 /// The AirPods connection ended: park the mic after DISCONNECT_PARK_DELAY
-/// unless a new connection took it meanwhile.
+/// unless a new connection took it meanwhile, then remove it if nothing records.
 fn release_mic(runtime: &tokio::runtime::Handle) {
     let generation = {
         let mut guard = shared_mic();
@@ -1099,6 +1102,18 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
             let parked = park();
             save_parked(Some(&parked));
             mic.parked = Some(parked);
+            // shortcut: checked once. If an app still records now, the mic
+            // stays listed until the next disconnect. Upgrade: retry when the
+            // recorder watcher sees the last recorder leave.
+            if !output::any_recorder() {
+                info!(
+                    "[hires] nothing records; removing '{}' until the AirPods are back",
+                    output::SOURCE_NAME
+                );
+                // The parked state stays on disk: the next connection creates
+                // the mic again and undoes the default-mic switch.
+                drop(guard.take());
+            }
         })
         .await;
     });
