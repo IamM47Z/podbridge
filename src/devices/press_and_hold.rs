@@ -16,13 +16,14 @@ pub const MODES: [(u8, &str); 4] = [
 ];
 
 /// What the page shows before any report or stored choice: Noise
-/// Cancellation and Transparency. Apple's support page 108918 does not name a
-/// default cycle. These two are the modes every AirPods with noise control
-/// offers.
+/// Cancellation and Transparency, the default cycle per Apple Support 108764
+/// ("By default, when you press and hold ... your AirPods switch between
+/// Active Noise Cancellation and Transparency mode.").
 pub const DEFAULT: u8 = NOISE_CANCELLATION | TRANSPARENCY;
 
 /// The mask to show: the AirPods' report, else the choice stored for this
-/// device, else DEFAULT. Some AirPods (Pro 2, A3064) never report 0x1A.
+/// device, else DEFAULT. Some AirPods (AirPods Pro 3, A3064) never report
+/// 0x1A.
 pub fn shown_mask(reported: Option<u8>, stored: Option<u8>) -> u8 {
     reported.or(stored).unwrap_or(DEFAULT)
 }

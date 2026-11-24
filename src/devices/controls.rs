@@ -76,8 +76,8 @@ pub fn find_choice(choices: &[Choice], value: u8) -> Choice {
         .unwrap_or(choices[0])
 }
 
-/// Settings some AirPods never report, such as AirPods Pro 2 with ear
-/// detection (0x0A) and the microphone (0x01). podbridge stores the choice
+/// Settings some AirPods never report, such as AirPods Pro 3 (A3064) with
+/// ear detection (0x0A) and the microphone (0x01). podbridge stores the choice
 /// per device and sends it again on each connect, like the press-and-hold
 /// modes. The stored choice wins over the AirPods' own value at connect.
 /// Until there is a report or a choice, the page shows the Android client's
@@ -148,8 +148,8 @@ mod tests {
     #[test]
     fn undocumented_values_show_the_android_fallback() {
         assert_eq!(find_choice(&PRESS_SPEEDS, 0x03).name, "Default");
-        // AirPods Pro 2 report a swipe interval of 0, which is not one of its
-        // values. Android shows "Default" (1) for it.
+        // AirPods Pro 3 (A3064) report a swipe interval of 0, which is not
+        // one of its values. Android shows "Default" (1) for it.
         assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x00).value, 0x01);
         assert_eq!(find_choice(&MIC_MODES, 0x03).name, "Automatic");
     }
