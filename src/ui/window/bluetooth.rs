@@ -144,7 +144,7 @@ impl App {
             .unwrap_or_else(|| "Unknown Device".to_string());
         let statuses = &state.control_command_status_list;
         let allow_off_mode = control_enabled(statuses, ControlCommandIdentifiers::AllowOffOption);
-        AirPodsState {
+        let mut airpods = AirPodsState {
             device_name,
             battery: state.battery_info.clone(),
             noise_control_mode: statuses
@@ -167,16 +167,23 @@ impl App {
                 ControlCommandIdentifiers::AdaptiveVolumeConfig,
             ),
             allow_off_mode,
-            adaptive_strength: statuses
-                .iter()
-                .find(|status| status.identifier == ControlCommandIdentifiers::AutoAncStrength)
-                .and_then(|status| status.value.first().copied()),
+            adaptive_strength: None,
             press_and_hold_modes: statuses
                 .iter()
                 .find(|status| status.identifier == ControlCommandIdentifiers::ListeningModeConfigs)
                 .and_then(|status| status.value.first().copied()),
+            one_bud_anc: None,
+            chime_volume: None,
+            volume_swipe: None,
+            volume_swipe_interval: None,
+            press_speed: None,
+            press_and_hold_duration: None,
             hires_mic_enabled: self.hires_mic_enabled,
+        };
+        for status in statuses {
+            airpods.record_setting(status.identifier, &status.value);
         }
+        airpods
     }
 
     fn device_disconnected(&mut self, mac: String) {
@@ -225,11 +232,6 @@ impl App {
                         state.personalized_volume_enabled = is_enabled;
                     }
                 }
-                ControlCommandIdentifiers::AutoAncStrength => {
-                    if let Some(state) = self.airpods_state_mut(mac) {
-                        state.adaptive_strength = status.value.first().copied();
-                    }
-                }
                 ControlCommandIdentifiers::ListeningModeConfigs => {
                     if let Some(state) = self.airpods_state_mut(mac) {
                         state.press_and_hold_modes = status.value.first().copied();
@@ -243,8 +245,13 @@ impl App {
                             combo_box::State::new(noise_control_modes(is_enabled));
                     }
                 }
-                _ => {
-                    debug!("Unhandled Control Command Status: {:?}", status);
+                identifier => {
+                    let recorded = self
+                        .airpods_state_mut(mac)
+                        .is_some_and(|state| state.record_setting(identifier, &status.value));
+                    if !recorded {
+                        debug!("Unhandled Control Command Status: {:?}", status);
+                    }
                 }
             },
             AACPEvent::BatteryInfo(battery_info) => {

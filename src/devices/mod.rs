@@ -1,4 +1,5 @@
 pub mod airpods;
+pub(crate) mod controls;
 pub mod enums;
 pub(crate) mod low_battery;
 pub(crate) mod nothing;

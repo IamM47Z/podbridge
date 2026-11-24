@@ -1,4 +1,5 @@
 use crate::bluetooth::aacp::{AACPManager, ControlCommandIdentifiers};
+use crate::devices::controls::{self, Choice};
 use crate::devices::press_and_hold;
 use crate::ui::style;
 use crate::ui::widgets::{copyable, info_row, toggle_row};
@@ -6,10 +7,10 @@ use iced::Alignment::End;
 use iced::border::Radius;
 use iced::widget::rule::FillMode;
 use iced::widget::{
-    Column, Container, Row, Space, checkbox, column, combo_box, container, row, rule, slider, text,
-    text_input, toggler,
+    Column, Container, Row, Space, checkbox, column, combo_box, container, pick_list, row, rule,
+    slider, text, text_input, toggler,
 };
-use iced::{Background, Border, Center, Color, Length, Padding, Theme};
+use iced::{Background, Border, Center, Color, Element, Length, Padding, Theme};
 use log::error;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,19 +32,24 @@ pub fn airpods_view<'a>(
 ) -> Container<'a, Message> {
     // order: name, noise control, press and hold config, call controls (not sure if why it might be needed, adding it just in case), audio (personalized volume, conversational awareness, adaptive audio slider), connection settings, microphone, head gestures (not adding this), off listening mode, device information
 
-    container(column![
-        name_section(mac, state, &aacp_manager),
-        Space::new().height(Length::from(20)),
-        listening_mode_section(mac, state, &aacp_manager),
-        Space::new().height(Length::from(20)),
-        audio_section(mac, state, &aacp_manager, pause_convo),
-        Space::new().height(Length::from(20)),
-        off_listening_mode_section(mac, state, &aacp_manager),
-        Space::new().height(Length::from(20)),
-        hires_mic_section(mac, state, &aacp_manager),
-        Space::new().height(Length::from(20)),
-        information_section(mac, devices_list)
-    ])
+    container(
+        column![
+            name_section(mac, state, &aacp_manager),
+            Space::new().height(Length::from(20)),
+            listening_mode_section(mac, state, &aacp_manager),
+            Space::new().height(Length::from(20)),
+            audio_section(mac, state, &aacp_manager, pause_convo),
+            Space::new().height(Length::from(20)),
+            off_listening_mode_section(mac, state, &aacp_manager),
+            Space::new().height(Length::from(20)),
+        ]
+        .extend(accessibility_section(mac, state))
+        .extend([
+            hires_mic_section(mac, state, &aacp_manager).into(),
+            Space::new().height(Length::from(20)).into(),
+            information_section(mac, devices_list).into(),
+        ]),
+    )
     .padding(20)
     .center_x(Length::Fill)
     .height(Length::Fill)
@@ -205,7 +211,11 @@ fn adaptive_strength_row<'a>(
         row![
             text("Less noise").size(14).style(style::text_muted),
             slider(0.0..=100.0, slider_from_level(level), move |value: f32| {
-                Message::AdaptiveStrengthChanged(mac.clone(), level_from_slider(value))
+                Message::SliderMoved(
+                    mac.clone(),
+                    ControlCommandIdentifiers::AutoAncStrength,
+                    level_from_slider(value),
+                )
             })
             .step(1.0_f32),
             text("More noise").size(14).style(style::text_muted),
@@ -356,6 +366,171 @@ fn off_listening_mode_section<'a>(
     ))
     .padding(Padding::from([5.0, 18.0]))
     .style(style::card)
+}
+
+/// Apple's AirPods accessibility settings, each shown once the AirPods
+/// report it; the whole section is left out when they report none.
+fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
+    let rows: Vec<Element<'a, Message>> = [
+        setting_toggle(
+            mac,
+            "Noise Cancellation with One AirPod",
+            "Allow AirPods to be put in noise cancellation mode when only one AirPod is in your ear.",
+            ControlCommandIdentifiers::OneBudAncMode,
+            state.one_bud_anc,
+        ),
+        setting_picker(
+            mac,
+            "Press Speed",
+            "Adjust the speed required to press two or three times on your AirPods.",
+            ControlCommandIdentifiers::DoubleClickInterval,
+            &controls::PRESS_SPEEDS,
+            state.press_speed,
+        ),
+        setting_picker(
+            mac,
+            "Press and Hold Duration",
+            "Adjust the duration required to press and hold on your AirPods.",
+            ControlCommandIdentifiers::ClickHoldInterval,
+            &controls::PRESS_AND_HOLD_DURATIONS,
+            state.press_and_hold_duration,
+        ),
+        chime_volume_row(mac, state.chime_volume),
+        setting_toggle(
+            mac,
+            "Volume Control",
+            "Adjust the volume by swiping up or down on the AirPods stem.",
+            ControlCommandIdentifiers::VolumeSwipeMode,
+            state.volume_swipe,
+        ),
+        setting_picker(
+            mac,
+            "Volume Swipe Speed",
+            "To prevent unintended volume adjustments, select the preferred wait time between swipes.",
+            ControlCommandIdentifiers::VolumeSwipeInterval,
+            &controls::VOLUME_SWIPE_INTERVALS,
+            state.volume_swipe_interval,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut card = column![].spacing(4).padding(8);
+    for (i, row) in rows.into_iter().enumerate() {
+        if i > 0 {
+            card = card.push(divider());
+        }
+        card = card.push(row);
+    }
+    vec![
+        container(text("Accessibility").size(18).style(style::text_accent))
+            .padding(Padding::from([5.0, 18.0]))
+            .into(),
+        container(card)
+            .padding(Padding::from([5.0, 10.0]))
+            .style(style::card)
+            .into(),
+        Space::new().height(Length::from(20)).into(),
+    ]
+}
+
+/// An on/off setting, shown once the AirPods report it.
+fn setting_toggle<'a>(
+    mac: &str,
+    title: &'a str,
+    description: &'a str,
+    identifier: ControlCommandIdentifiers,
+    value: Option<u8>,
+) -> Option<Element<'a, Message>> {
+    let mac = mac.to_string();
+    Some(
+        toggle_row(
+            title,
+            description,
+            toggler(value? == controls::ON).on_toggle(move |on| {
+                Message::ControlChanged(mac.clone(), identifier, controls::toggle_value(on))
+            }),
+            8,
+        )
+        .into(),
+    )
+}
+
+/// A setting with a few named values, shown once the AirPods report it. A
+/// value no client documents shows as no selection.
+fn setting_picker<'a>(
+    mac: &str,
+    title: &'a str,
+    description: &'a str,
+    identifier: ControlCommandIdentifiers,
+    choices: &'static [Choice],
+    value: Option<u8>,
+) -> Option<Element<'a, Message>> {
+    let selected = controls::find_choice(choices, value?);
+    let mac = mac.to_string();
+    Some(
+        row![
+            column![
+                text(title).size(16),
+                text(description)
+                    .size(12)
+                    .style(style::text_muted)
+                    .width(Length::Fill)
+            ]
+            .width(Length::Fill),
+            pick_list(choices, selected, move |choice: Choice| {
+                Message::ControlChanged(mac.clone(), identifier, choice.value)
+            })
+            .padding(Padding::from([5.0, 10.0]))
+            .width(Length::from(150))
+        ]
+        .align_y(Center)
+        .spacing(8)
+        .into(),
+    )
+}
+
+/// The volume of the sounds the AirPods play, shown once they report it.
+fn chime_volume_row<'a>(mac: &str, volume: Option<u8>) -> Option<Element<'a, Message>> {
+    let volume = volume?;
+    let mac = mac.to_string();
+    Some(
+        column![
+            text("Tone Volume").size(16),
+            text("Adjust the tone volume of sound effects played by AirPods.")
+                .size(12)
+                .style(style::text_muted),
+            slider(
+                0.0..=f32::from(controls::MAX_CHIME_VOLUME),
+                f32::from(volume.min(controls::MAX_CHIME_VOLUME)),
+                move |value: f32| {
+                    Message::SliderMoved(
+                        mac.clone(),
+                        ControlCommandIdentifiers::ChimeVolume,
+                        value.round() as u8,
+                    )
+                }
+            )
+            .step(1.0_f32),
+        ]
+        .spacing(6)
+        .padding(Padding::from([4.0, 0.0]))
+        .into(),
+    )
+}
+
+fn divider<'a>() -> Element<'a, Message> {
+    rule::horizontal(1)
+        .style(|theme: &Theme| rule::Style {
+            color: theme.palette().text.scale_alpha(0.2),
+            radius: Radius::from(12),
+            fill_mode: FillMode::Full,
+            snap: false,
+        })
+        .into()
 }
 
 fn hires_mic_section<'a>(

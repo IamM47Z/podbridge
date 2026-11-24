@@ -4,7 +4,7 @@ use super::bluetooth::{device_type_from_file, noise_control_modes};
 use super::{App, Message, Tab};
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
-use crate::devices::press_and_hold;
+use crate::devices::{controls, press_and_hold};
 use crate::ui::messages::BluetoothUIMessage;
 use bluer::Address;
 use iced::Task;
@@ -13,7 +13,7 @@ use log::error;
 use std::collections::HashMap;
 use std::time::Duration;
 
-const ADAPTIVE_STRENGTH_DEBOUNCE: Duration = Duration::from_millis(300);
+const SLIDER_DEBOUNCE: Duration = Duration::from_millis(300);
 
 impl App {
     pub(super) fn got_paired_devices(&mut self, map: HashMap<String, Address>) -> Task<Message> {
@@ -56,31 +56,50 @@ impl App {
         Task::none()
     }
 
-    /// Show the new level at once; send it once the slider has been still for
-    /// ADAPTIVE_STRENGTH_DEBOUNCE, like the Android client. Covers drags, taps,
-    /// arrow keys and scrolling alike.
-    pub(super) fn adaptive_strength_changed(&mut self, mac: String, level: u8) -> Task<Message> {
+    /// Show and send a setting's new value at once.
+    pub(super) fn control_changed(
+        &mut self,
+        mac: String,
+        identifier: ControlCommandIdentifiers,
+        value: u8,
+    ) -> Task<Message> {
         if let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) {
-            state.adaptive_strength = Some(level);
+            state.record_setting(identifier, &[value]);
         }
-        self.adaptive_strength_generation += 1;
-        let generation = self.adaptive_strength_generation;
-        Task::perform(tokio::time::sleep(ADAPTIVE_STRENGTH_DEBOUNCE), move |_| {
-            Message::AdaptiveStrengthSettled(mac.clone(), generation)
+        self.send_control_command(&mac, identifier, value)
+    }
+
+    /// Show a slider's new value at once; send it once the slider has been
+    /// still for SLIDER_DEBOUNCE, like the Android client. Covers drags, taps,
+    /// arrow keys and scrolling alike.
+    pub(super) fn slider_moved(
+        &mut self,
+        mac: String,
+        identifier: ControlCommandIdentifiers,
+        value: u8,
+    ) -> Task<Message> {
+        if let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) {
+            state.record_setting(identifier, &[value]);
+        }
+        let generation = self.slider_generations.entry(identifier).or_default();
+        *generation += 1;
+        let generation = *generation;
+        Task::perform(tokio::time::sleep(SLIDER_DEBOUNCE), move |_| {
+            Message::SliderSettled(mac.clone(), identifier, value, generation)
         })
     }
 
-    pub(super) fn adaptive_strength_settled(&self, mac: &str, generation: u64) -> Task<Message> {
-        if generation != self.adaptive_strength_generation {
+    pub(super) fn slider_settled(
+        &self,
+        mac: &str,
+        identifier: ControlCommandIdentifiers,
+        value: u8,
+        generation: u64,
+    ) -> Task<Message> {
+        if self.slider_generations.get(&identifier) != Some(&generation) {
             return Task::none();
         }
-        let Some(DeviceState::AirPods(state)) = self.device_states.get(mac) else {
-            return Task::none();
-        };
-        let Some(level) = state.adaptive_strength else {
-            return Task::none();
-        };
-        self.send_control_command(mac, ControlCommandIdentifiers::AutoAncStrength, level)
+        self.send_control_command(mac, identifier, value)
     }
 
     /// Flip one press-and-hold mode, unless that would leave fewer than two.
@@ -124,7 +143,8 @@ impl App {
         };
         Task::perform(
             async move {
-                if let Err(e) = aacp.send_control_command(identifier, &[value]).await {
+                let payload = controls::payload(identifier, value);
+                if let Err(e) = aacp.send_control_command(identifier, &payload).await {
                     error!("Failed to send {:?}: {}", identifier, e);
                 }
             },

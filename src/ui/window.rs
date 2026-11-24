@@ -1,3 +1,4 @@
+use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::bluetooth::managers::DeviceManagers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
 use crate::ui::messages::BluetoothUIMessage;
@@ -86,8 +87,8 @@ pub struct App {
     audio_off_when_not_wearing: bool,
     pause_when_one_removed: bool,
     hand_back_when_idle: bool,
-    /// Bumped on each adaptive strength slider move; only the last move sends.
-    adaptive_strength_generation: u64,
+    /// Bumped on each move of a setting's slider; only its last move sends.
+    slider_generations: HashMap<ControlCommandIdentifiers, u64>,
 }
 
 pub struct BluetoothState {
@@ -118,10 +119,12 @@ pub enum Message {
     ConfirmAddDevice,
     CancelAddDevice,
     StateChanged(String, DeviceState),
-    /// The adaptive strength slider moved (mac, level).
-    AdaptiveStrengthChanged(String, u8),
-    /// The debounce after a slider move ran out (mac, generation).
-    AdaptiveStrengthSettled(String, u64),
+    /// A setting's toggle or picker changed (mac, setting, value): sent at once.
+    ControlChanged(String, ControlCommandIdentifiers, u8),
+    /// A setting's slider moved (mac, setting, value).
+    SliderMoved(String, ControlCommandIdentifiers, u8),
+    /// The debounce after a slider move ran out (mac, setting, value, generation).
+    SliderSettled(String, ControlCommandIdentifiers, u8, u64),
     /// A press-and-hold listening mode checkbox was clicked (mac, mode bit).
     PressAndHoldToggled(String, u8),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
@@ -228,7 +231,7 @@ impl App {
                 paired_devices: HashMap::new(),
                 device_states,
                 pending_add_device: None,
-                adaptive_strength_generation: 0,
+                slider_generations: HashMap::new(),
                 device_type_state: combo_box::State::new(vec![DeviceType::Nothing]),
                 selected_device_type: None,
                 device_managers,
@@ -311,11 +314,14 @@ impl App {
             Message::ConfirmAddDevice => self.confirm_add_device(),
             Message::CancelAddDevice => self.cancel_add_device(),
             Message::StateChanged(mac, state) => self.state_changed(mac, state),
-            Message::AdaptiveStrengthChanged(mac, level) => {
-                self.adaptive_strength_changed(mac, level)
+            Message::ControlChanged(mac, identifier, value) => {
+                self.control_changed(mac, identifier, value)
             }
-            Message::AdaptiveStrengthSettled(mac, generation) => {
-                self.adaptive_strength_settled(&mac, generation)
+            Message::SliderMoved(mac, identifier, value) => {
+                self.slider_moved(mac, identifier, value)
+            }
+            Message::SliderSettled(mac, identifier, value, generation) => {
+                self.slider_settled(&mac, identifier, value, generation)
             }
             Message::PressAndHoldToggled(mac, mode) => self.press_and_hold_toggled(mac, mode),
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),

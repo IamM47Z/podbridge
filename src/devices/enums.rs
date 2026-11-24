@@ -1,4 +1,4 @@
-use crate::bluetooth::aacp::BatteryInfo;
+use crate::bluetooth::aacp::{BatteryInfo, ControlCommandIdentifiers};
 use crate::devices::airpods::AirPodsInformation;
 use crate::devices::nothing::NothingInformation;
 use iced::widget::combo_box;
@@ -63,9 +63,37 @@ pub struct AirPodsState {
     /// The press-and-hold listening modes bitmask (control command 0x1A), as
     /// the AirPods report it; None until they do.
     pub press_and_hold_modes: Option<u8>,
+    /// Accessibility settings, as the AirPods report them; each None until
+    /// they do. Toggles hold controls::ON or OFF, pickers a controls::Choice
+    /// value, chime volume 0 to 100.
+    pub one_bud_anc: Option<u8>,
+    pub chime_volume: Option<u8>,
+    pub volume_swipe: Option<u8>,
+    pub volume_swipe_interval: Option<u8>,
+    pub press_speed: Option<u8>,
+    pub press_and_hold_duration: Option<u8>,
     /// Local capture state of the proprietary hi-res microphone (UI-driven).
     pub hires_mic_enabled: bool,
     pub battery: Vec<BatteryInfo>,
+}
+
+impl AirPodsState {
+    /// Record a setting the AirPods reported or the user chose. Returns false
+    /// for a setting this state does not keep this way.
+    pub fn record_setting(&mut self, identifier: ControlCommandIdentifiers, value: &[u8]) -> bool {
+        let slot = match identifier {
+            ControlCommandIdentifiers::AutoAncStrength => &mut self.adaptive_strength,
+            ControlCommandIdentifiers::OneBudAncMode => &mut self.one_bud_anc,
+            ControlCommandIdentifiers::ChimeVolume => &mut self.chime_volume,
+            ControlCommandIdentifiers::VolumeSwipeMode => &mut self.volume_swipe,
+            ControlCommandIdentifiers::VolumeSwipeInterval => &mut self.volume_swipe_interval,
+            ControlCommandIdentifiers::DoubleClickInterval => &mut self.press_speed,
+            ControlCommandIdentifiers::ClickHoldInterval => &mut self.press_and_hold_duration,
+            _ => return false,
+        };
+        *slot = value.first().copied();
+        true
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -145,5 +173,60 @@ impl NothingAncMode {
             NothingAncMode::Transparency => 0x07,
             NothingAncMode::Off => 0x05,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn airpods_state() -> AirPodsState {
+        AirPodsState {
+            device_name: String::new(),
+            noise_control_mode: AirPodsNoiseControlMode::Off,
+            noise_control_state: combo_box::State::new(Vec::new()),
+            conversation_awareness_enabled: false,
+            personalized_volume_enabled: false,
+            allow_off_mode: false,
+            adaptive_strength: None,
+            press_and_hold_modes: None,
+            one_bud_anc: None,
+            chime_volume: None,
+            volume_swipe: None,
+            volume_swipe_interval: None,
+            press_speed: None,
+            press_and_hold_duration: None,
+            hires_mic_enabled: false,
+            battery: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reported_settings_land_in_their_field() {
+        let mut state = airpods_state();
+        for (id, value) in [
+            (ControlCommandIdentifiers::OneBudAncMode, 0x01),
+            (ControlCommandIdentifiers::ChimeVolume, 75),
+            (ControlCommandIdentifiers::VolumeSwipeMode, 0x02),
+            (ControlCommandIdentifiers::VolumeSwipeInterval, 0x03),
+            (ControlCommandIdentifiers::DoubleClickInterval, 0x01),
+            (ControlCommandIdentifiers::ClickHoldInterval, 0x02),
+            (ControlCommandIdentifiers::AutoAncStrength, 40),
+        ] {
+            assert!(state.record_setting(id, &[value, 0x50]));
+        }
+        assert_eq!(state.one_bud_anc, Some(0x01));
+        assert_eq!(state.chime_volume, Some(75));
+        assert_eq!(state.volume_swipe, Some(0x02));
+        assert_eq!(state.volume_swipe_interval, Some(0x03));
+        assert_eq!(state.press_speed, Some(0x01));
+        assert_eq!(state.press_and_hold_duration, Some(0x02));
+        assert_eq!(state.adaptive_strength, Some(40));
+    }
+
+    #[test]
+    fn other_settings_are_not_recorded() {
+        let mut state = airpods_state();
+        assert!(!state.record_setting(ControlCommandIdentifiers::ListeningMode, &[0x02]));
     }
 }
