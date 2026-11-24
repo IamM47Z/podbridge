@@ -705,7 +705,8 @@ mod tests {
 
     #[test]
     fn connected_devices() {
-        // Packets captured from AirPods Pro, payload after the 04000400 header.
+        // Packets captured from AirPods Pro, with made-up addresses; payload
+        // after the 04000400 header.
         let dev = |mac: &str, info1, info2| ConnectedDevice {
             mac: mac.to_string(),
             info1,
