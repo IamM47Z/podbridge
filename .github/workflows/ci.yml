@@ -47,3 +47,29 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked
+
+  # Builds the release binary as release.yml does, without publishing it.
+  portable:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config clang nasm libdbus-1-dev libpulse-dev
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-portable-${{ hashFiles('Cargo.lock', 'packaging/portable-build.sh') }}
+
+      - name: Build and check
+        run: packaging/portable-build.sh

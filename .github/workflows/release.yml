@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # The oldest supported image sets the glibc floor of both artifacts.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -35,14 +36,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config clang libdbus-1-dev libpulse-dev \
-            libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev \
-            libavdevice-dev libswresample-dev libswscale-dev
+          sudo apt-get install -y pkg-config clang nasm libdbus-1-dev libpulse-dev
 
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
 
       - name: Build
-        run: cargo build --release --locked
+        run: packaging/portable-build.sh
 
       - name: Package
         run: |
@@ -52,6 +51,7 @@ jobs:
           stage="$APP-$GITHUB_REF_NAME-x86_64-linux"
           mkdir "$stage"
           cp "target/release/$APP" LICENSE NOTICE README.md assets/font/*.txt \
+            target/ffmpeg/ffmpeg-*/COPYING.LGPLv2.1 \
             "assets/$APP_ID.desktop" assets/icon.png "$stage/"
           tar -czf "dist/$stage.tar.gz" "$stage"
 
@@ -66,7 +66,8 @@ jobs:
           cp assets/icon.png "$APP_ID.png"
           ./linuxdeploy --appdir AppDir --executable "target/release/$APP" \
             --desktop-file "assets/$APP_ID.desktop" --icon-file "$APP_ID.png"
-          install -Dm644 -t "AppDir/usr/share/licenses/$APP/" LICENSE NOTICE assets/font/*.txt
+          install -Dm644 -t "AppDir/usr/share/licenses/$APP/" LICENSE NOTICE assets/font/*.txt \
+            target/ffmpeg/ffmpeg-*/COPYING.LGPLv2.1
           ARCH=x86_64 ./appimagetool --runtime-file runtime AppDir "dist/$APP-$GITHUB_REF_NAME-x86_64.AppImage"
 
           (cd dist && sha256sum -- * > SHA256SUMS)

@@ -12,7 +12,9 @@ BlueZ 5.88 with AirPods Pro.
 Arch Linux: build `packaging/podbridge-git/PKGBUILD` with `makepkg -si`.
 
 Other distributions: download the binary or the AppImage from the
-[releases](https://github.com/IamM47Z/podbridge/releases).
+[releases](https://github.com/IamM47Z/podbridge/releases). Both need glibc
+2.39 or later. The binary also needs D-Bus and the PulseAudio client library
+(`libpulse`); FFmpeg is built in.
 
 ## Build
 
