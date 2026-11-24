@@ -1095,16 +1095,19 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
         let _ = tokio::task::spawn_blocking(move || {
             let mut guard = shared_mic();
             let Some(mic) = guard.as_mut() else { return };
-            if mic.users > 0 || mic.generation != generation || mic.parked.is_some() {
+            if mic.users > 0 || mic.generation != generation {
                 return;
             }
-            info!("[hires] AirPods still gone; switching apps to another microphone");
-            let parked = park();
-            save_parked(Some(&parked));
-            mic.parked = Some(parked);
+            // Often parked already: no bud was worn before the disconnect.
+            if mic.parked.is_none() {
+                info!("[hires] AirPods still gone; switching apps to another microphone");
+                let parked = park();
+                save_parked(Some(&parked));
+                mic.parked = Some(parked);
+            }
             // shortcut: checked once. If an app still records now, the mic
-            // stays listed until the next disconnect. Upgrade: retry when the
-            // recorder watcher sees the last recorder leave.
+            // stays listed until the AirPods connect and leave again. Upgrade:
+            // retry when the recorder watcher sees the last recorder leave.
             if !output::any_recorder() {
                 info!(
                     "[hires] nothing records; removing '{}' until the AirPods are back",
