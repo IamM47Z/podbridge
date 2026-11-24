@@ -165,17 +165,18 @@ pub fn parse(packet: &[u8]) -> Result<Packet, ParseError> {
                     0x01 => BatteryStatus::Charging,
                     0x02 => BatteryStatus::NotCharging,
                     0x04 => BatteryStatus::Disconnected,
-                    _ => {
+                    0x05 => {
                         // AirPods Pro 3 report 0x05 for a bud in the case. Neither
                         // the AAP notes nor librepods' clients define it, so the
                         // entry is skipped. It repeats on every report: log once.
-                        static UNKNOWN_STATUS: Once = Once::new();
-                        UNKNOWN_STATUS.call_once(|| {
-                            debug!(
-                                "Skipping battery entries with undocumented status {:#04x}",
-                                status
-                            );
+                        static IN_CASE_STATUS: Once = Once::new();
+                        IN_CASE_STATUS.call_once(|| {
+                            debug!("Skipping battery entries with undocumented status 0x05");
                         });
+                        continue;
+                    }
+                    _ => {
+                        error!("Unknown battery status: {:#04x}", status);
                         continue;
                     }
                 };
