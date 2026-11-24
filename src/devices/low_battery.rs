@@ -2,6 +2,8 @@
 //! 10% per discharge. The case is left out; it does not play audio.
 
 use crate::bluetooth::aacp::{BatteryComponent, BatteryInfo, BatteryStatus};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 const THRESHOLDS: [u8; 2] = [20, 10];
 const RESET_MARGIN: u8 = 10;
@@ -46,6 +48,22 @@ impl LowBatteryAlerts {
         }
         crossed
     }
+}
+
+// Each reconnect creates a fresh event loop. Keep the alert state outside it,
+// keyed by the AirPods' address, so a discharge alerts once per threshold
+// however often the AirPods reconnect.
+static ALERTS: LazyLock<Mutex<HashMap<String, LowBatteryAlerts>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// LowBatteryAlerts::check, with the state kept per AirPods across reconnects.
+pub fn check_for(airpods_mac: &str, battery: &[BatteryInfo]) -> Vec<(BatteryComponent, u8)> {
+    ALERTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(airpods_mac.to_ascii_uppercase())
+        .or_default()
+        .check(battery)
 }
 
 /// The notification text for the buds that crossed a threshold.
@@ -178,6 +196,18 @@ mod tests {
             bud(BatteryComponent::Right, 5, BatteryStatus::Disconnected),
         ];
         assert!(a.check(&reports).is_empty());
+    }
+
+    #[test]
+    fn alerts_once_per_airpods_across_reconnects() {
+        // Made-up addresses, unique to this test: the state is process-wide.
+        const A: &str = "02:00:00:00:00:A1";
+        const B: &str = "02:00:00:00:00:B1";
+        assert_eq!(check_for(A, &[left(19)]), [(BatteryComponent::Left, 19)]);
+        // A reconnect of the same AirPods does not alert again.
+        assert!(check_for(A, &[left(19)]).is_empty());
+        // Other AirPods keep their own state.
+        assert_eq!(check_for(B, &[left(19)]), [(BatteryComponent::Left, 19)]);
     }
 
     #[test]
