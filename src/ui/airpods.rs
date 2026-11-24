@@ -1,18 +1,17 @@
 use crate::bluetooth::aacp::{AACPManager, ControlCommandIdentifiers};
+use crate::bluetooth::aacp::{BatteryComponent, BatteryStatus};
 use crate::devices::controls::{self, Choice};
 use crate::devices::press_and_hold;
 use crate::ui::style;
-use crate::ui::widgets::{copyable, info_row, toggle_row};
+use crate::ui::widgets::{Section, collapsible, copyable, divided, info_row, page, toggle_row};
 use iced::Alignment::End;
-use iced::border::Radius;
-use iced::widget::rule::FillMode;
 use iced::widget::{
-    Column, Container, Row, Space, checkbox, column, combo_box, container, pick_list, row, rule,
-    slider, text, text_input, toggler,
+    Column, Container, Row, Space, checkbox, column, combo_box, container, pick_list, row, slider,
+    text, text_input, toggler,
 };
 use iced::{Background, Border, Center, Color, Element, Length, Padding, Theme};
 use log::error;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::thread;
 use tokio::runtime::Runtime;
@@ -28,34 +27,82 @@ pub fn airpods_view<'a>(
     state: &'a AirPodsState,
     aacp_manager: Arc<AACPManager>,
     pause_convo: bool,
+    expanded: &BTreeSet<String>,
     // att_manager: Arc<ATTManager>
-) -> Container<'a, Message> {
-    // order: name, noise control, press and hold config, call controls (not sure if why it might be needed, adding it just in case), audio (personalized volume, conversational awareness, adaptive audio slider), connection settings, microphone, head gestures (not adding this), off listening mode, device information
+) -> Element<'a, Message> {
+    // Like Apple's AirPods page: the essentials first, the rest in sections
+    // that stay collapsed until opened.
+    let essentials = column![name_section(mac, state, &aacp_manager)]
+        .extend(battery_section(state))
+        .push(listening_mode_section(mac, state, &aacp_manager));
 
-    container(
-        column![
-            name_section(mac, state, &aacp_manager),
-            Space::new().height(Length::from(20)),
-            listening_mode_section(mac, state, &aacp_manager),
-            Space::new().height(Length::from(20)),
-            audio_section(mac, state, &aacp_manager, pause_convo),
-            Space::new().height(Length::from(20)),
-        ]
-        .extend(connection_section(mac, state))
-        .extend([
-            off_listening_mode_section(mac, state, &aacp_manager).into(),
-            Space::new().height(Length::from(20)).into(),
-        ])
-        .extend(accessibility_section(mac, state))
-        .extend([
-            hires_mic_section(mac, state, &aacp_manager).into(),
-            Space::new().height(Length::from(20)).into(),
-            information_section(mac, devices_list).into(),
-        ]),
+    let accessibility = accessibility_rows(mac, state);
+    let connection = connection_rows(mac, state);
+    let information = information_rows(mac, devices_list);
+    let sections = [
+        Some(collapsible(Section::Audio, expanded, || {
+            audio_section(mac, state, &aacp_manager, pause_convo).into()
+        })),
+        Some(collapsible(Section::PressAndHold, expanded, || {
+            press_and_hold_section(mac, state, &aacp_manager).into()
+        })),
+        (!accessibility.is_empty()).then(|| {
+            collapsible(Section::Accessibility, expanded, || {
+                divided(accessibility).into()
+            })
+        }),
+        (!connection.is_empty())
+            .then(|| collapsible(Section::Connection, expanded, || divided(connection).into())),
+        Some(collapsible(Section::Microphone, expanded, || {
+            hires_mic_section(mac, state, &aacp_manager).into()
+        })),
+        information.map(|rows| collapsible(Section::DeviceInfo, expanded, || rows.into())),
+    ];
+    page(essentials.extend(sections.into_iter().flatten()))
+}
+
+/// The charge of each part, in the sidebar's order: left, right, case.
+/// Left out until the AirPods report one.
+fn battery_section<'a>(state: &AirPodsState) -> Option<Element<'a, Message>> {
+    const ORDER: [BatteryComponent; 4] = [
+        BatteryComponent::Headphone,
+        BatteryComponent::Left,
+        BatteryComponent::Right,
+        BatteryComponent::Case,
+    ];
+    let cells: Vec<Element<'a, Message>> = ORDER
+        .iter()
+        .filter_map(|component| state.battery.iter().find(|b| b.component == *component))
+        .map(|battery| {
+            let level = if battery.status == BatteryStatus::Disconnected {
+                "\u{2013}".to_string()
+            } else {
+                format!("{}%", battery.level)
+            };
+            let mut cell = column![
+                text(battery.component.name())
+                    .size(12)
+                    .style(style::text_muted),
+                text(level).size(20).style(style::text_normal),
+            ]
+            .align_x(Center)
+            .width(Length::Fill);
+            if battery.status == BatteryStatus::Charging {
+                cell = cell.push(text("Charging").size(12).style(style::text_accent));
+            }
+            cell.into()
+        })
+        .collect();
+    if cells.is_empty() {
+        return None;
+    }
+    Some(
+        container(row(cells).spacing(8).align_y(Center))
+            .padding(Padding::from([10.0, 18.0]))
+            .width(Length::Fill)
+            .style(style::card)
+            .into(),
     )
-    .padding(20)
-    .center_x(Length::Fill)
-    .height(Length::Fill)
 }
 
 fn name_section<'a>(
@@ -69,7 +116,7 @@ fn name_section<'a>(
         row![
             Space::new().width(10),
             text("Name").size(16).style(style::text_normal),
-            Space::new().width(Length::Fill),
+            Space::new().width(12),
             text_input("", &state.device_name)
                 .padding(Padding::from([5.0, 10.0]))
                 .style(|theme: &Theme, _status| {
@@ -118,8 +165,10 @@ fn listening_mode_section<'a>(
     container(
         column![
             row![
-                text("Listening Mode").size(16).style(style::text_normal),
-                Space::new().width(Length::Fill),
+                text("Listening Mode")
+                    .size(16)
+                    .style(style::text_normal)
+                    .width(Length::Fill),
                 {
                     let state_clone = state.clone();
                     let mac = mac.to_string();
@@ -159,10 +208,10 @@ fn listening_mode_section<'a>(
                     .menu_style(style::combo_menu)
                 }
             ]
+            .spacing(12)
             .align_y(Center)
         ]
-        .extend(adaptive_strength_row(mac, state))
-        .extend(press_and_hold_row(mac, state)),
+        .extend(adaptive_strength_row(mac, state)),
     )
     .padding(Padding::from([5.0, 18.0]))
     .style(style::card)
@@ -191,7 +240,7 @@ fn press_and_hold_row<'a>(
             text("Press and hold cycles through")
                 .size(14)
                 .style(style::text_muted),
-            row(boxes).spacing(16)
+            row(boxes).spacing(16).wrap().vertical_spacing(8)
         ]
         .spacing(6)
         .padding(Padding::from([8.0, 0.0]))
@@ -247,32 +296,31 @@ fn audio_section<'a>(
     aacp_manager: &Arc<AACPManager>,
     pause_convo: bool,
 ) -> Column<'a, Message> {
-    column![
-        container(text("Audio Settings").size(18).style(style::text_accent))
-            .padding(Padding::from([5.0, 18.0])),
-        container(
-            column![
-                personalized_volume_row(mac, state, aacp_manager),
-                divider(),
-                conversation_awareness_row(mac, state, aacp_manager, pause_convo)
-            ]
-            .extend(
-                setting_toggle(
-                    mac,
-                    "Pause Media When Falling Asleep",
-                    "AirPods pause your media when they detect that you have fallen asleep.",
-                    ControlCommandIdentifiers::SleepDetectionConfig,
-                    state.sleep_detection,
-                )
-                .into_iter()
-                .flat_map(|row| [divider(), row]),
-            )
-            .spacing(4)
-            .padding(8)
-        )
-        .padding(Padding::from([5.0, 10.0]))
-        .style(style::card)
-    ]
+    let rows = [
+        Some(personalized_volume_row(mac, state, aacp_manager).into()),
+        Some(conversation_awareness_row(mac, state, aacp_manager, pause_convo).into()),
+        setting_toggle(
+            mac,
+            "Pause Media When Falling Asleep",
+            "AirPods pause your media when they detect that you have fallen asleep.",
+            ControlCommandIdentifiers::SleepDetectionConfig,
+            state.sleep_detection,
+        ),
+    ];
+    divided(rows.into_iter().flatten().collect())
+}
+
+/// Which modes a press and hold cycles through, and whether Off is one.
+fn press_and_hold_section<'a>(
+    mac: &str,
+    state: &'a AirPodsState,
+    aacp_manager: &Arc<AACPManager>,
+) -> Column<'a, Message> {
+    let rows = [
+        press_and_hold_row(mac, state),
+        Some(off_listening_mode_row(mac, state, aacp_manager).into()),
+    ];
+    divided(rows.into_iter().flatten().collect())
 }
 
 fn personalized_volume_row<'a>(
@@ -343,14 +391,14 @@ fn conversation_awareness_row<'a>(
     )
 }
 
-fn off_listening_mode_section<'a>(
+fn off_listening_mode_row<'a>(
     mac: &str,
     state: &'a AirPodsState,
     aacp_manager: &Arc<AACPManager>,
-) -> Container<'a, Message> {
+) -> Row<'a, Message> {
     let aacp_manager_olm = aacp_manager.clone();
     let mac = mac.to_string();
-    container(toggle_row(
+    toggle_row(
         "Off Listening Mode",
         "When this is on, AirPods listening modes will include an Off option. Loud sound levels are not reduced when listening mode is set to Off.",
         toggler(state.allow_off_mode).on_toggle(move |is_enabled| {
@@ -371,14 +419,12 @@ fn off_listening_mode_section<'a>(
             Message::StateChanged(mac.to_string(), DeviceState::AirPods(state))
         }),
         8,
-    ))
-    .padding(Padding::from([5.0, 18.0]))
-    .style(style::card)
+    )
 }
 
 /// Ear detection and microphone. Until the AirPods report them, they show
 /// the stored choice or the Android client's default.
-fn connection_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
+fn connection_rows<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
     let rows = [
         setting_toggle(
             mac,
@@ -396,12 +442,12 @@ fn connection_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Me
             state.mic_mode,
         ),
     ];
-    settings_section("Connection", rows.into_iter().flatten().collect())
+    rows.into_iter().flatten().collect()
 }
 
 /// Apple's AirPods accessibility settings. Each row shows once the AirPods
 /// report it. With none reported, the section is left out.
-fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
+fn accessibility_rows<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
     let rows = [
         setting_toggle(
             mac,
@@ -443,35 +489,7 @@ fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a,
             state.volume_swipe_interval,
         ),
     ];
-    settings_section("Accessibility", rows.into_iter().flatten().collect())
-}
-
-/// A titled card of settings rows split by dividers, then a gap; nothing
-/// when no row is shown.
-fn settings_section<'a>(
-    title: &'a str,
-    rows: Vec<Element<'a, Message>>,
-) -> Vec<Element<'a, Message>> {
-    if rows.is_empty() {
-        return Vec::new();
-    }
-    let mut card = column![].spacing(4).padding(8);
-    for (i, row) in rows.into_iter().enumerate() {
-        if i > 0 {
-            card = card.push(divider());
-        }
-        card = card.push(row);
-    }
-    vec![
-        container(text(title).size(18).style(style::text_accent))
-            .padding(Padding::from([5.0, 18.0]))
-            .into(),
-        container(card)
-            .padding(Padding::from([5.0, 10.0]))
-            .style(style::card)
-            .into(),
-        Space::new().height(Length::from(20)).into(),
-    ]
+    rows.into_iter().flatten().collect()
 }
 
 /// An on/off setting, shown once the AirPods report it.
@@ -559,22 +577,11 @@ fn chime_volume_row<'a>(mac: &str, volume: Option<u8>) -> Option<Element<'a, Mes
     )
 }
 
-fn divider<'a>() -> Element<'a, Message> {
-    rule::horizontal(1)
-        .style(|theme: &Theme| rule::Style {
-            color: theme.palette().text.scale_alpha(0.2),
-            radius: Radius::from(12),
-            fill_mode: FillMode::Full,
-            snap: false,
-        })
-        .into()
-}
-
 fn hires_mic_section<'a>(
     mac: &str,
     state: &'a AirPodsState,
     aacp_manager: &Arc<AACPManager>,
-) -> Container<'a, Message> {
+) -> Column<'a, Message> {
     let aacp_manager_mic = aacp_manager.clone();
     let mac = mac.to_string();
     let state = state.clone();
@@ -601,63 +608,50 @@ fn hires_mic_section<'a>(
     if mic_active {
         content = content.push(level_meter(level, mic_app));
     }
-
-    container(content)
-        .padding(Padding::from([5.0, 18.0]))
-        .style(style::card)
+    content
 }
 
-fn information_section<'a>(
+/// The model, serial numbers and firmware the AirPods reported; None before
+/// they did.
+fn information_rows<'a>(
     mac: &str,
     devices_list: &HashMap<String, DeviceData>,
-) -> Column<'a, Message> {
-    let mut information_col = column![];
-    if let Some(device) = devices_list.get(mac) {
-        if let Some(DeviceInformation::AirPods(ref airpods_info)) = device.information {
-            let info_rows = column![
-                info_row(
-                    "Model Number",
-                    text(airpods_info.model_number.clone()).size(16)
-                ),
-                info_row(
-                    "Manufacturer",
-                    text(airpods_info.manufacturer.clone()).size(16)
-                ),
-                info_row("Serial Number", copyable(&airpods_info.serial_number)),
-                info_row(
-                    "Left Serial Number",
-                    copyable(&airpods_info.left_serial_number)
-                ),
-                info_row(
-                    "Right Serial Number",
-                    copyable(&airpods_info.right_serial_number)
-                ),
-                info_row("Version 1", text(airpods_info.version1.clone()).size(16)),
-                info_row("Version 2", text(airpods_info.version2.clone()).size(16)),
-                info_row("Version 3", text(airpods_info.version3.clone()).size(16))
-            ]
-            .spacing(4)
-            .padding(8);
-
-            information_col = column![
-                container(
-                    text("Device Information")
-                        .size(18)
-                        .style(style::text_accent)
-                )
-                .padding(Padding::from([5.0, 18.0])),
-                container(info_rows)
-                    .padding(Padding::from([5.0, 10.0]))
-                    .style(style::card)
-            ];
-        } else {
+) -> Option<Column<'a, Message>> {
+    let device = devices_list.get(mac)?;
+    let Some(DeviceInformation::AirPods(ref airpods_info)) = device.information else {
+        if device.information.is_some() {
             error!(
                 "Expected AirPodsInformation for device {}, got something else",
                 mac
             );
         }
-    }
-    information_col
+        return None;
+    };
+    Some(
+        column![
+            info_row(
+                "Model Number",
+                text(airpods_info.model_number.clone()).size(16)
+            ),
+            info_row(
+                "Manufacturer",
+                text(airpods_info.manufacturer.clone()).size(16)
+            ),
+            info_row("Serial Number", copyable(&airpods_info.serial_number)),
+            info_row(
+                "Left Serial Number",
+                copyable(&airpods_info.left_serial_number)
+            ),
+            info_row(
+                "Right Serial Number",
+                copyable(&airpods_info.right_serial_number)
+            ),
+            info_row("Version 1", text(airpods_info.version1.clone()).size(16)),
+            info_row("Version 2", text(airpods_info.version2.clone()).size(16)),
+            info_row("Version 3", text(airpods_info.version3.clone()).size(16))
+        ]
+        .spacing(4),
+    )
 }
 
 fn level_meter<'a>(level: f32, app: Option<String>) -> Container<'a, Message> {

@@ -2,12 +2,13 @@ use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use crate::bluetooth::managers::DeviceManagers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
 use crate::ui::messages::BluetoothUIMessage;
+use crate::ui::widgets::Section;
 use crate::utils::{AppSettings, MyTheme, StemAction};
 use bluer::Address;
-use iced::widget::{combo_box, container, pane_grid};
+use iced::widget::{combo_box, pane_grid, responsive};
 use iced::{Element, Font, Length, Settings, Size, Subscription, Task, Theme, daemon, window};
 use log::error;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -27,34 +28,34 @@ pub fn start_ui(
     // stem_control: Arc<AtomicBool>,
 ) -> iced::Result {
     let ui_rx = Arc::new(Mutex::new(ui_rx));
-
-    // not sure if this is a good idea
-    daemon(
-        move || {
-            App::new(
-                Arc::clone(&ui_rx),
-                start_minimized,
-                Arc::clone(&device_managers),
-                // Arc::clone(&stem_control),
-            )
-        },
-        App::update,
-        App::view,
-    )
-    .subscription(App::subscription)
-    .theme(App::theme)
-    .title(App::title)
-    .settings(Settings {
-        id: Some(APP_ID.to_string()),
-        fonts: vec![
-            include_bytes!("../../assets/font/Inter-Regular.ttf")
-                .as_slice()
-                .into(),
-        ],
-        default_font: Font::with_name("Inter"),
-        ..Settings::default()
+    run_app(move || {
+        App::new(
+            Arc::clone(&ui_rx),
+            start_minimized,
+            Arc::clone(&device_managers),
+            // Arc::clone(&stem_control),
+        )
     })
-    .run()
+}
+
+/// Runs the window's event loop on the App that `boot` builds.
+fn run_app(boot: impl Fn() -> (App, Task<Message>) + 'static) -> iced::Result {
+    // not sure if this is a good idea
+    daemon(boot, App::update, App::view)
+        .subscription(App::subscription)
+        .theme(App::theme)
+        .title(App::title)
+        .settings(Settings {
+            id: Some(APP_ID.to_string()),
+            fonts: vec![
+                include_bytes!("../../assets/font/Inter-Regular.ttf")
+                    .as_slice()
+                    .into(),
+            ],
+            default_font: Font::with_name("Inter"),
+            ..Settings::default()
+        })
+        .run()
 }
 
 /// The basename of the desktop file; Wayland compositors match windows by it.
@@ -87,6 +88,10 @@ pub struct App {
     audio_off_when_not_wearing: bool,
     pause_when_one_removed: bool,
     hand_back_when_idle: bool,
+    /// Keys of the collapsible sections the user opened (Section::key).
+    expanded_sections: BTreeSet<String>,
+    /// In a narrow window, whether the device list covers the page.
+    sidebar_open: bool,
     /// Bumped on each move of a setting's slider; only its last move sends.
     slider_generations: HashMap<ControlCommandIdentifiers, u64>,
 }
@@ -138,6 +143,10 @@ pub enum Message {
     HiResMicAgcChanged(bool),
     HiResMicPauseConvoChanged(bool),
     MicLevelTick,
+    /// A collapsible section's title was clicked.
+    SectionToggled(Section),
+    /// The narrow window's "Devices" button was clicked.
+    SidebarToggled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -246,6 +255,8 @@ impl App {
                 audio_off_when_not_wearing,
                 pause_when_one_removed,
                 hand_back_when_idle: app_settings.hand_back_when_idle,
+                expanded_sections: app_settings.expanded_sections,
+                sidebar_open: false,
             },
             Task::batch(vec![open_task, wait_task]),
         )
@@ -266,6 +277,7 @@ impl App {
             s.audio_off_when_not_wearing = self.audio_off_when_not_wearing;
             s.pause_when_one_removed = self.pause_when_one_removed;
             s.hand_back_when_idle = self.hand_back_when_idle;
+            s.expanded_sections = self.expanded_sections.clone();
         });
     }
 
@@ -296,13 +308,25 @@ impl App {
             }
             Message::SelectTab(tab) => {
                 self.selected_tab = tab;
+                self.sidebar_open = false;
                 Task::none()
             }
+            Message::SidebarToggled => {
+                self.sidebar_open = !self.sidebar_open;
+                Task::none()
+            }
+            Message::SectionToggled(section) => self.change_setting(|app| {
+                let key = section.key();
+                if !app.expanded_sections.remove(key) {
+                    app.expanded_sections.insert(key.to_string());
+                }
+            }),
             Message::CopyToClipboard(data) => iced::clipboard::write(data),
             Message::MicLevelTick => Task::none(),
             Message::Bluetooth(ui_message) => self.handle_bluetooth(ui_message),
             Message::ShowNewDialogTab => {
                 self.selected_tab = Tab::AddDevice;
+                self.sidebar_open = false;
                 Task::perform(load_paired_devices(), Message::GotPairedDevices)
             }
             Message::GotPairedDevices(map) => self.got_paired_devices(map),
@@ -352,16 +376,20 @@ impl App {
 
     fn view(&self, _id: window::Id) -> Element<'_, Message> {
         let devices_list = read_devices_list();
-        let pane_grid =
+        responsive(move |size| {
+            if size.width < COMPACT_WIDTH {
+                return self.compact_view(&devices_list);
+            }
             pane_grid::PaneGrid::new(&self.panes, |_pane_id, pane, _is_maximized| match pane {
                 Pane::Sidebar => self.sidebar_pane(&devices_list),
-                Pane::Content => self.content_pane(&devices_list),
+                Pane::Content => pane_grid::Content::new(self.content(&devices_list)),
             })
             .width(Length::Fill)
             .height(Length::Fill)
-            .on_resize(20, Message::Resized);
-
-        container(pane_grid).into()
+            .on_resize(20, Message::Resized)
+            .into()
+        })
+        .into()
     }
 
     fn theme(&self, _id: window::Id) -> Theme {
@@ -387,9 +415,15 @@ impl App {
     }
 }
 
+/// Below this width the sidebar folds into a "Devices" bar, so the page keeps
+/// the room.
+const COMPACT_WIDTH: f32 = 640.0;
+
 fn main_window_settings() -> window::Settings {
     window::Settings {
-        min_size: Some(Size::new(400.0, 300.0)),
+        size: Size::new(880.0, 680.0),
+        // A phone-sized column still fits every row.
+        min_size: Some(Size::new(360.0, 420.0)),
         icon: window::icon::from_file_data(include_bytes!("../../assets/icon.png"), None).ok(),
         // iced takes the Linux app_id from here; Settings.id only reaches the BSDs.
         platform_specific: window::settings::PlatformSpecific {

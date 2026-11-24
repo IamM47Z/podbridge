@@ -1,11 +1,11 @@
 use crate::bluetooth::att::{ATTHandles, ATTManager};
 use crate::devices::enums::{DeviceData, DeviceInformation, DeviceState, NothingState};
 use crate::ui::style;
-use crate::ui::widgets::info_row;
+use crate::ui::widgets::{info_row, page};
 use crate::ui::window::Message;
 use iced::widget::combo_box;
 use iced::widget::{Column, Container, Space, column, container, row, text};
-use iced::{Length, Theme};
+use iced::{Element, Length, Theme};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
@@ -16,17 +16,14 @@ pub fn nothing_view<'a>(
     devices_list: &HashMap<String, DeviceData>,
     state: &'a NothingState,
     att_manager: Arc<ATTManager>,
-) -> Container<'a, Message> {
-    container(column![
+) -> Element<'a, Message> {
+    page(column![
         noise_control_section(mac, state, att_manager),
-        Space::new().height(Length::from(20)),
         container(information_section(mac, devices_list))
             .style(|theme: &Theme| style::outlined_panel(theme, 20.0))
             .padding(20)
+            .width(Length::Fill)
     ])
-    .padding(20)
-    .center_x(Length::Fill)
-    .height(Length::Fill)
 }
 
 fn information_section<'a>(
@@ -65,8 +62,8 @@ fn noise_control_section<'a>(
         row![
             text("Noise Control Mode")
                 .size(16)
-                .style(style::text_normal),
-            Space::new().width(Length::Fill),
+                .style(style::text_normal)
+                .width(Length::Fill),
             {
                 let state_clone = state.clone();
                 let mac = mac.to_string();
@@ -121,6 +118,7 @@ fn noise_control_section<'a>(
                 .menu_style(style::combo_menu)
             }
         ]
+        .spacing(12)
         .align_y(iced::Alignment::Center),
     )
     .padding(iced::Padding::from([5.0, 18.0]))

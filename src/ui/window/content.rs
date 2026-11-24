@@ -3,18 +3,19 @@ use crate::bluetooth::managers::DeviceManagers;
 use crate::devices::enums::{DeviceData, DeviceState, DeviceType};
 use crate::ui::airpods::airpods_view;
 use crate::ui::nothing::nothing_view;
-use iced::Length;
-use iced::widget::{Container, container, pane_grid, text};
+use iced::widget::{container, text};
+use iced::{Element, Length};
 use log::{debug, error};
 use std::collections::HashMap;
 
 impl App {
-    pub(super) fn content_pane<'a>(
+    /// The page of the selected tab.
+    pub(super) fn content<'a>(
         &'a self,
         devices_list: &HashMap<String, DeviceData>,
-    ) -> pane_grid::Content<'a, Message> {
+    ) -> Element<'a, Message> {
         let device_managers = self.device_managers.blocking_read();
-        let content = match &self.selected_tab {
+        match &self.selected_tab {
             Tab::Device(id) => {
                 if id == "none" {
                     centered_message("Select a device")
@@ -23,10 +24,8 @@ impl App {
                 }
             }
             Tab::Settings => self.settings_page(),
-            Tab::AddDevice => self.add_device_page(devices_list),
-        };
-
-        pane_grid::Content::new(content)
+            Tab::AddDevice => self.add_device_page(devices_list).into(),
+        }
     }
 
     fn device_page<'a>(
@@ -34,7 +33,7 @@ impl App {
         id: &'a str,
         devices_list: &HashMap<String, DeviceData>,
         device_managers: &HashMap<String, DeviceManagers>,
-    ) -> Container<'a, Message> {
+    ) -> Element<'a, Message> {
         let device_type = devices_list.get(id).map(|d| d.type_.clone());
         let device_state = self.device_states.get(id);
         debug!(
@@ -55,7 +54,7 @@ impl App {
         id: &'a str,
         devices_list: &HashMap<String, DeviceData>,
         device_managers: &HashMap<String, DeviceManagers>,
-    ) -> Container<'a, Message> {
+    ) -> Element<'a, Message> {
         let state = match self.device_states.get(id) {
             Some(DeviceState::AirPods(state)) => Some(state),
             _ => None,
@@ -70,6 +69,7 @@ impl App {
                             state,
                             aacp_manager.clone(),
                             self.hires_mic_pause_convo,
+                            &self.expanded_sections,
                         )
                     })
                 })
@@ -85,7 +85,7 @@ fn nothing_page<'a>(
     devices_list: &HashMap<String, DeviceData>,
     device_state: Option<&'a DeviceState>,
     device_managers: &HashMap<String, DeviceManagers>,
-) -> Container<'a, Message> {
+) -> Element<'a, Message> {
     let Some(DeviceState::Nothing(state)) = device_state else {
         return centered_message("No state available for this Nothing device");
     };
@@ -100,8 +100,10 @@ fn nothing_page<'a>(
     nothing_view(id, devices_list, state, att_manager.clone())
 }
 
-fn centered_message(message: &str) -> Container<'_, Message> {
-    container(text(message).size(16))
+fn centered_message<'a>(message: &str) -> Element<'a, Message> {
+    container(text(message.to_string()).size(16).center())
+        .padding(20)
         .center_x(Length::Fill)
         .center_y(Length::Fill)
+        .into()
 }

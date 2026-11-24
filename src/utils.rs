@@ -3,7 +3,7 @@ use aes::cipher::Array;
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use iced::Theme;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 /// The folder name under the XDG data, config and state folders.
@@ -269,6 +269,9 @@ pub struct AppSettings {
     /// that is in effect; restored on the next activation if a disconnect
     /// interrupted the normal restore.
     pub conv_volume_restore: Option<u32>,
+    /// Keys of the window's collapsible sections the user opened (see
+    /// ui::widgets::Section); the rest stay collapsed.
+    pub expanded_sections: BTreeSet<String>,
 }
 
 impl Default for AppSettings {
@@ -290,6 +293,7 @@ impl Default for AppSettings {
             hand_back_when_idle: true,
             convo_restore_pending: false,
             conv_volume_restore: None,
+            expanded_sections: BTreeSet::new(),
         }
     }
 }

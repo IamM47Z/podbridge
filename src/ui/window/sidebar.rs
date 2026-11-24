@@ -2,9 +2,13 @@ use super::{App, Message, Tab};
 use crate::bluetooth::aacp::{BatteryComponent, BatteryStatus};
 use crate::devices::enums::{AirPodsState, DeviceData, DeviceState};
 use crate::ui::style;
+use crate::ui::widgets::divider;
+use iced::Padding;
 use iced::border::Radius;
 use iced::widget::rule::FillMode;
-use iced::widget::{Column, Space, button, column, container, pane_grid, row, rule, text};
+use iced::widget::{
+    Column, Space, button, column, container, pane_grid, row, rule, scrollable, text,
+};
 use iced::{Center, Element, Length, Theme};
 use std::collections::HashMap;
 
@@ -13,7 +17,72 @@ impl App {
         &'a self,
         devices_list: &HashMap<String, DeviceData>,
     ) -> pane_grid::Content<'a, Message> {
-        let content = column![
+        pane_grid::Content::new(row![
+            self.sidebar(devices_list),
+            rule::vertical(1).style(|theme: &Theme| {
+                rule::Style {
+                    color: theme.palette().primary.scale_alpha(0.2),
+                    radius: Radius::from(8.0),
+                    fill_mode: FillMode::Full,
+                    snap: false,
+                }
+            })
+        ])
+    }
+
+    /// A narrow window: a "Devices" bar over the page. The bar's button swaps
+    /// the page for the sidebar until a tab is picked.
+    pub(super) fn compact_view<'a>(
+        &'a self,
+        devices_list: &HashMap<String, DeviceData>,
+    ) -> Element<'a, Message> {
+        let title = match &self.selected_tab {
+            Tab::Device(mac) => devices_list
+                .get(mac)
+                .map(|d| d.name.clone())
+                .unwrap_or_default(),
+            Tab::Settings => "Settings".to_string(),
+            Tab::AddDevice => "Add Device".to_string(),
+        };
+        let toggle = button(
+            text(if self.sidebar_open {
+                "Devices \u{25B4}"
+            } else {
+                "Devices \u{25BE}"
+            })
+            .size(16),
+        )
+        .style(move |theme: &Theme, _status| style::sidebar_tab(theme, self.sidebar_open))
+        .padding(Padding::from([6.0, 12.0]))
+        .on_press(Message::SidebarToggled);
+        let bar = container(
+            row![
+                toggle,
+                text(title)
+                    .size(16)
+                    .style(style::text_muted)
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Right)
+            ]
+            .spacing(12)
+            .align_y(Center),
+        )
+        .padding(Padding::from([8.0, 12.0]));
+        let body: Element<'a, Message> = if self.sidebar_open {
+            self.sidebar(devices_list).into()
+        } else {
+            self.content(devices_list)
+        };
+        column![bar, divider(), body].into()
+    }
+
+    /// The device list with its add button, and the settings tab. The list
+    /// scrolls when it outgrows the window.
+    pub(super) fn sidebar<'a>(
+        &'a self,
+        devices_list: &HashMap<String, DeviceData>,
+    ) -> Column<'a, Message> {
+        column![
             row![
                 text("Devices").size(18),
                 Space::new().width(Length::Fill),
@@ -31,22 +100,11 @@ impl App {
             .align_y(Center)
             .padding(4),
             Space::new().height(Length::from(8)),
-            self.device_buttons(devices_list),
-            Space::new().height(Length::Fill),
+            scrollable(self.device_buttons(devices_list)).height(Length::Fill),
+            Space::new().height(Length::from(8)),
             self.settings_button()
         ]
-        .padding(12);
-        pane_grid::Content::new(row![
-            content,
-            rule::vertical(1).style(|theme: &Theme| {
-                rule::Style {
-                    color: theme.palette().primary.scale_alpha(0.2),
-                    radius: Radius::from(8.0),
-                    fill_mode: FillMode::Full,
-                    snap: false,
-                }
-            })
-        ])
+        .padding(12)
     }
 
     /// One button per known device, sorted by name.
