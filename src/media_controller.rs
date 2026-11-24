@@ -360,10 +360,27 @@ impl MediaController {
             .iter()
             .map(|d| d.mac.clone())
             .collect();
-        let pending = self.state.lock().await.hand_back.pending().is_some();
-        // Calls and other audio that are not MPRIS players count too. Only
-        // asked while a hand-back waits: it opens a PulseAudio connection.
+        let (pending, resume_pending) = {
+            let state = self.state.lock().await;
+            (
+                state.hand_back.pending().is_some(),
+                state.ear_detection_enabled
+                    && one_bud_resume_pending(
+                        &state.old_in_ear_data,
+                        &state.paused_by_app_services,
+                    ),
+            )
+        };
+        // Only read while a hand-back waits: the settings file and the
+        // PulseAudio connection below cost a little on every poll.
+        let settings = pending.then(crate::utils::AppSettings::load);
+        // Turned off counts as in use: nothing is handed back, and no idle
+        // time builds up to fire the moment it is turned on again.
         let in_use_here = in_use_here
+            || settings.as_ref().is_some_and(|s| {
+                !s.hand_back_when_idle || (s.pause_when_one_removed && resume_pending)
+            })
+            // Calls and other audio that are not MPRIS players count too.
             || (pending
                 && tokio::task::spawn_blocking(card::any_playing)
                     .await
@@ -379,10 +396,6 @@ impl MediaController {
         let Some(target) = target else {
             return;
         };
-        if !crate::utils::AppSettings::load().hand_back_when_idle {
-            debug!("Hand-back to {} is turned off", target);
-            return;
-        }
         info!(
             "Nothing here has used the AirPods for a while; handing them back to {}",
             target
@@ -1489,9 +1502,15 @@ fn ear_actions(
     a
 }
 
+/// One bud is out and putting it back would resume what removing it paused:
+/// the user is still listening here.
+fn one_bud_resume_pending(in_ear: &[bool], paused: &[String]) -> bool {
+    in_ear.iter().filter(|&&b| b).count() == 1 && !paused.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EarActions, ear_actions};
+    use super::{EarActions, ear_actions, one_bud_resume_pending};
 
     const BOTH: [bool; 2] = [true, true];
     const ONE: [bool; 2] = [true, false];
@@ -1552,6 +1571,16 @@ mod tests {
         assert_eq!(a, EarActions::default());
         let a = ear_actions(&[], &NONE, true, false);
         assert!(a.deactivate_a2dp && !a.pause);
+    }
+
+    #[test]
+    fn one_bud_out_with_a_pending_resume_is_in_use() {
+        let paused = ["org.mpris.MediaPlayer2.spotify".to_string()];
+        assert!(one_bud_resume_pending(&ONE, &paused));
+        assert!(!one_bud_resume_pending(&ONE, &[]));
+        for in_ear in [BOTH, NONE] {
+            assert!(!one_bud_resume_pending(&in_ear, &paused));
+        }
     }
 
     #[test]
