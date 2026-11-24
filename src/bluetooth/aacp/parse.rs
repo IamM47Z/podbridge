@@ -1,6 +1,6 @@
 //! Pure decoding of incoming AACP packets: no state, no I/O. The only side
-//! effect is the per-field diagnostics (unknown battery component, unknown ear
-//! status, key count) that receive_packet always logged mid-decode.
+//! effect is the per-field diagnostics (unknown battery component or status,
+//! unknown ear status, key count) that receive_packet always logged mid-decode.
 
 use super::{
     AudioSource, AudioSourceType, BatteryComponent, BatteryInfo, BatteryStatus, ConnectedDevice,
@@ -8,6 +8,7 @@ use super::{
     ProximityKey, StemPressBudType, StemPressType, opcodes,
 };
 use log::{debug, error, info};
+use std::sync::Once;
 
 /// One decoded AACP packet, one variant per opcode podbridge acts on.
 #[derive(Debug, PartialEq, Eq)]
@@ -165,7 +166,16 @@ pub fn parse(packet: &[u8]) -> Result<Packet, ParseError> {
                     0x02 => BatteryStatus::NotCharging,
                     0x04 => BatteryStatus::Disconnected,
                     _ => {
-                        error!("Unknown battery status: {:#04x}", status);
+                        // AirPods Pro 3 report 0x05 for a bud in the case. Neither
+                        // the AAP notes nor librepods' clients define it, so the
+                        // entry is skipped. It repeats on every report: log once.
+                        static UNKNOWN_STATUS: Once = Once::new();
+                        UNKNOWN_STATUS.call_once(|| {
+                            debug!(
+                                "Skipping battery entries with undocumented status {:#04x}",
+                                status
+                            );
+                        });
                         continue;
                     }
                 };
@@ -406,6 +416,23 @@ mod tests {
         assert_eq!(
             parse_body(&[0x04, 0x00, 0x00]),
             Ok(Packet::BatteryInfo(vec![]))
+        );
+    }
+
+    #[test]
+    fn battery_skips_the_undocumented_in_case_status() {
+        // AirPods Pro 3 with both buds in the case: the buds report 0x05.
+        let p = parse_body(&[
+            0x04, 0x00, 0x03, 0x04, 0x01, 0x4F, 0x05, 0x01, 0x02, 0x01, 0x50, 0x05, 0x01, 0x08,
+            0x01, 0x4C, 0x02, 0x01,
+        ]);
+        assert_eq!(
+            p,
+            Ok(Packet::BatteryInfo(vec![BatteryInfo {
+                component: BatteryComponent::Case,
+                level: 76,
+                status: BatteryStatus::NotCharging,
+            }]))
         );
     }
 
