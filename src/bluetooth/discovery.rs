@@ -69,3 +69,49 @@ pub(crate) async fn connect_a2dp_profile(mac: &str) -> bluer::Result<()> {
         ))),
     }
 }
+
+/// The alias to set so BlueZ shows the name the AirPods report, or `None`
+/// when it already matches or the reported name is empty.
+fn alias_to_set<'a>(current: &str, reported: &'a str) -> Option<&'a str> {
+    (!reported.is_empty() && current != reported).then_some(reported)
+}
+
+/// Makes the BlueZ alias of `mac` match the name the AirPods report, so
+/// desktop Bluetooth settings and PipeWire show the AirPods' own name.
+pub(crate) async fn sync_alias(mac: &str, reported: &str) -> bluer::Result<()> {
+    let addr: bluer::Address = mac
+        .parse()
+        .map_err(|_| bluer::Error::from(Error::other(format!("bad address {mac}"))))?;
+    let session = bluer::Session::new().await?;
+    let adapter = session.default_adapter().await?;
+    let device = adapter.device(addr)?;
+    let current = device.alias().await?;
+    if let Some(alias) = alias_to_set(&current, reported) {
+        device.set_alias(alias.to_string()).await?;
+        log::info!("Set the BlueZ alias of {mac} from {current:?} to {alias:?}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::alias_to_set;
+
+    #[test]
+    fn alias_to_set_returns_the_reported_name_when_it_differs() {
+        assert_eq!(
+            alias_to_set("Mateus’s AirPods Pro - Find My", "Mateus’s AirPods Pro"),
+            Some("Mateus’s AirPods Pro")
+        );
+    }
+
+    #[test]
+    fn alias_to_set_is_none_when_equal() {
+        assert_eq!(alias_to_set("Pods", "Pods"), None);
+    }
+
+    #[test]
+    fn alias_to_set_is_none_when_reported_name_is_empty() {
+        assert_eq!(alias_to_set("Pods", ""), None);
+    }
+}

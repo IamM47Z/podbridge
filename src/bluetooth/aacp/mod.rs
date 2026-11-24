@@ -610,6 +610,15 @@ impl AACPManager {
                 let mac = self.state.lock().await.airpods_mac;
                 info!("Received Information: {:?}", info);
                 if let Some(mac) = mac {
+                    let reported = info.name.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            crate::bluetooth::discovery::sync_alias(&mac.to_string(), &reported)
+                                .await
+                        {
+                            error!("Failed to set the BlueZ alias: {}", e);
+                        }
+                    });
                     update_devices_off_runtime(move |devices| {
                         let Some(device_data) = devices.get_mut(&mac.to_string()) else {
                             return false;
