@@ -70,14 +70,7 @@ pub fn check_for(airpods_mac: &str, battery: &[BatteryInfo]) -> Vec<(BatteryComp
 pub fn alert_body(crossed: &[(BatteryComponent, u8)]) -> String {
     crossed
         .iter()
-        .map(|(c, level)| {
-            let name = match c {
-                BatteryComponent::Left => "Left",
-                BatteryComponent::Right => "Right",
-                _ => "AirPods",
-            };
-            format!("{name}: {level}%")
-        })
+        .map(|(c, level)| format!("{}: {level}%", c.name()))
         .collect::<Vec<_>>()
         .join(", ")
 }

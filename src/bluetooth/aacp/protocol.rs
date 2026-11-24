@@ -250,6 +250,18 @@ pub enum BatteryComponent {
     Case = 8,
 }
 
+impl BatteryComponent {
+    /// The name shown in notifications. Single-unit headphones show as AirPods.
+    pub fn name(self) -> &'static str {
+        match self {
+            BatteryComponent::Left => "Left",
+            BatteryComponent::Right => "Right",
+            BatteryComponent::Case => "Case",
+            BatteryComponent::Headphone => "AirPods",
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BatteryStatus {

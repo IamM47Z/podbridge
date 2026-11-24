@@ -140,12 +140,7 @@ fn lid_open_body(batteries: &[BatteryInfo]) -> String {
         .iter()
         .filter(|b| b.status != BatteryStatus::Disconnected)
         .map(|b| {
-            let name = match b.component {
-                BatteryComponent::Left => "Left",
-                BatteryComponent::Right => "Right",
-                BatteryComponent::Case => "Case",
-                BatteryComponent::Headphone => "AirPods",
-            };
+            let name = b.component.name();
             let charging = if b.status == BatteryStatus::Charging {
                 " (charging)"
             } else {
