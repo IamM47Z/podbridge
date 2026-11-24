@@ -375,7 +375,8 @@ fn off_listening_mode_section<'a>(
     .style(style::card)
 }
 
-/// Ear detection and microphone, each shown once the AirPods report it.
+/// Ear detection and microphone. Until the AirPods report them, they show
+/// the stored choice or the Android client's default.
 fn connection_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
     let rows = [
         setting_toggle(

@@ -1,8 +1,10 @@
-use crate::bluetooth::aacp::{BatteryInfo, ControlCommandIdentifiers};
+use crate::bluetooth::aacp::{BatteryInfo, ControlCommandIdentifiers, ControlCommandStatus};
 use crate::devices::airpods::AirPodsInformation;
+use crate::devices::controls;
 use crate::devices::nothing::NothingInformation;
 use iced::widget::combo_box;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -104,6 +106,20 @@ impl AirPodsState {
         };
         *slot = value.first().copied();
         true
+    }
+
+    /// Give each setting in controls::STORED the AirPods did not report the
+    /// stored choice (identifier to value), else its default.
+    pub fn fill_unreported(&mut self, statuses: &[ControlCommandStatus], stored: &HashMap<u8, u8>) {
+        for (identifier, default) in controls::STORED {
+            if !statuses
+                .iter()
+                .any(|status| status.identifier == identifier)
+            {
+                let value = stored.get(&(identifier as u8)).copied().unwrap_or(default);
+                self.record_setting(identifier, &[value]);
+            }
+        }
     }
 }
 
@@ -242,6 +258,38 @@ mod tests {
         assert_eq!(state.ear_detection, Some(0x02));
         assert_eq!(state.mic_mode, Some(0x01));
         assert_eq!(state.sleep_detection, Some(0x01));
+    }
+
+    fn status(identifier: ControlCommandIdentifiers, value: u8) -> ControlCommandStatus {
+        ControlCommandStatus {
+            identifier,
+            value: vec![value],
+        }
+    }
+
+    #[test]
+    fn a_report_beats_the_stored_choice() {
+        let mut state = airpods_state();
+        let statuses = [status(ControlCommandIdentifiers::EarDetectionConfig, 0x02)];
+        state.record_setting(ControlCommandIdentifiers::EarDetectionConfig, &[0x02]);
+        state.fill_unreported(&statuses, &HashMap::from([(0x0A, 0x01)]));
+        assert_eq!(state.ear_detection, Some(0x02));
+    }
+
+    #[test]
+    fn an_unreported_setting_shows_the_stored_choice() {
+        let mut state = airpods_state();
+        state.fill_unreported(&[], &HashMap::from([(0x0A, 0x02), (0x01, 0x01)]));
+        assert_eq!(state.ear_detection, Some(0x02));
+        assert_eq!(state.mic_mode, Some(0x01));
+    }
+
+    #[test]
+    fn an_unreported_setting_without_a_choice_shows_the_default() {
+        let mut state = airpods_state();
+        state.fill_unreported(&[], &HashMap::new());
+        assert_eq!(state.ear_detection, Some(0x01));
+        assert_eq!(state.mic_mode, Some(0x00));
     }
 
     #[test]

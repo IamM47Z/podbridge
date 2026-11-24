@@ -211,9 +211,8 @@ async fn restore_press_and_hold_modes(aacp_manager: &AACPManager, mac: &str) {
     }
 }
 
-/// Send the stored choices of settings some AirPods never report (see
-/// controls::STORED) again, and record them so the backend and the page
-/// follow them.
+/// Send the stored choice of each setting in controls::STORED again. Record
+/// it so the backend and the page follow it.
 async fn restore_stored_controls(aacp_manager: &AACPManager, mac: &str) {
     let Some(stored) = crate::utils::AppSettings::load()
         .stored_controls

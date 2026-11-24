@@ -72,16 +72,18 @@ pub fn find_choice(choices: &[Choice], value: u8) -> Choice {
     choices
         .iter()
         .find(|c| c.value == value)
-        .unwrap_or(&choices[0])
-        .to_owned()
+        .copied()
+        .unwrap_or(choices[0])
 }
 
 /// Settings some AirPods never report, such as AirPods Pro 2 with ear
 /// detection (0x0A) and the microphone (0x01). podbridge stores the choice
-/// per device and sends it again on each connect. Until there is a report or
-/// a choice, the page shows the Android client's default: ear detection on
-/// (its "automatic_ear_detection" preference defaults to true), microphone
-/// automatic (it reads a missing 0x01 as 0x00).
+/// per device and sends it again on each connect, like the press-and-hold
+/// modes. The stored choice wins over the AirPods' own value at connect.
+/// Until there is a report or a choice, the page shows the Android client's
+/// default. Ear detection is on, as its "automatic_ear_detection" preference
+/// defaults to true. The microphone is automatic, as it reads a missing 0x01
+/// as 0x00.
 pub const STORED: [(ControlCommandIdentifiers, u8); 2] = [
     (ControlCommandIdentifiers::EarDetectionConfig, ON),
     (ControlCommandIdentifiers::MicMode, 0x00),
@@ -147,7 +149,7 @@ mod tests {
     fn undocumented_values_show_the_android_fallback() {
         assert_eq!(find_choice(&PRESS_SPEEDS, 0x03).name, "Default");
         // AirPods Pro 2 report a swipe interval of 0, which is not one of its
-        // values; Android shows "Default" (1) for it.
+        // values. Android shows "Default" (1) for it.
         assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x00).value, 0x01);
         assert_eq!(find_choice(&MIC_MODES, 0x03).name, "Automatic");
     }

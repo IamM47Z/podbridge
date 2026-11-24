@@ -2,7 +2,6 @@
 
 use super::{App, Message, Tab, main_window_settings, read_devices_list};
 use crate::bluetooth::aacp::{AACPEvent, ControlCommandIdentifiers, ControlCommandStatus};
-use crate::devices::controls;
 use crate::devices::enums::{
     AirPodsNoiseControlMode, AirPodsState, DeviceState, DeviceType, NothingAncMode, NothingState,
 };
@@ -191,15 +190,7 @@ impl App {
             .stored_controls
             .remove(mac)
             .unwrap_or_default();
-        for (identifier, default) in controls::STORED {
-            if !statuses
-                .iter()
-                .any(|status| status.identifier == identifier)
-            {
-                let value = stored.get(&(identifier as u8)).copied().unwrap_or(default);
-                airpods.record_setting(identifier, &[value]);
-            }
-        }
+        airpods.fill_unreported(statuses, &stored);
         airpods
     }
 
