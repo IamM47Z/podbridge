@@ -965,8 +965,8 @@ mod tests {
     async fn short_connected_devices_packet_is_rejected() {
         let manager = AACPManager::new();
         for extra in 0..2 {
-            // opcode, 0x00, 0x01, 0x00, count = 1, then 7 + `extra` bytes: one or
-            // two short of the 8 the entry needs (it starts at offset 5).
+            // opcode, 0x00, 0x01, 0x00, count = 1, then 6 + `extra` bytes: two or
+            // one short of the 8 the entry needs (it starts at offset 5).
             let mut packet = HEADER_BYTES.to_vec();
             packet.extend_from_slice(&[opcodes::CONNECTED_DEVICES, 0x00, 0x01, 0x00, 0x01]);
             packet.extend(std::iter::repeat_n(0xAA, 6 + extra));
