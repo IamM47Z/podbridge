@@ -8,10 +8,11 @@ use std::sync::{LazyLock, Mutex};
 const THRESHOLDS: [u8; 2] = [20, 10];
 const RESET_MARGIN: u8 = 10;
 
-/// The lowest threshold already alerted for each bud, per discharge.
+/// Per bud, this discharge: the lowest threshold already alerted and the
+/// lowest level seen.
 #[derive(Debug, Default)]
 pub struct LowBatteryAlerts {
-    alerted: Vec<(BatteryComponent, u8)>,
+    alerted: Vec<(BatteryComponent, u8, u8)>,
 }
 
 impl LowBatteryAlerts {
@@ -22,10 +23,16 @@ impl LowBatteryAlerts {
             if b.component == BatteryComponent::Case || b.status == BatteryStatus::Disconnected {
                 continue;
             }
-            let last = self.alerted.iter().position(|(c, _)| *c == b.component);
-            // Charging, or well above every threshold, starts a new discharge.
-            // The margin keeps a level flickering at 20/21% from re-alerting.
-            if b.status == BatteryStatus::Charging || b.level > THRESHOLDS[0] + RESET_MARGIN {
+            let last = self.alerted.iter().position(|(c, ..)| *c == b.component);
+            // Charging, well above every threshold, or well above the lowest
+            // level seen starts a new discharge. The last catches a charge
+            // while connected elsewhere, which this host never sees. The
+            // margin keeps a level flickering at 20/21% from re-alerting.
+            let risen = last.is_some_and(|i| b.level >= self.alerted[i].2 + RESET_MARGIN);
+            if b.status == BatteryStatus::Charging
+                || b.level > THRESHOLDS[0] + RESET_MARGIN
+                || risen
+            {
                 if let Some(i) = last {
                     self.alerted.remove(i);
                 }
@@ -35,13 +42,16 @@ impl LowBatteryAlerts {
                 continue;
             };
             match last {
-                Some(i) if self.alerted[i].1 <= threshold => {}
                 Some(i) => {
-                    self.alerted[i].1 = threshold;
-                    crossed.push((b.component, b.level));
+                    let entry = &mut self.alerted[i];
+                    entry.2 = entry.2.min(b.level);
+                    if threshold < entry.1 {
+                        entry.1 = threshold;
+                        crossed.push((b.component, b.level));
+                    }
                 }
                 None => {
-                    self.alerted.push((b.component, threshold));
+                    self.alerted.push((b.component, threshold, b.level));
                     crossed.push((b.component, b.level));
                 }
             }
@@ -139,7 +149,7 @@ mod tests {
     fn first_report_below_ten_alerts_once() {
         let mut a = LowBatteryAlerts::default();
         assert_eq!(a.check(&[left(8)]), [(BatteryComponent::Left, 8)]);
-        assert!(a.check(&[left(20)]).is_empty());
+        assert!(a.check(&[left(15)]).is_empty());
     }
 
     #[test]
@@ -201,6 +211,16 @@ mod tests {
         assert!(check_for(A, &[left(19)]).is_empty());
         // Other AirPods keep their own state.
         assert_eq!(check_for(B, &[left(19)]), [(BatteryComponent::Left, 19)]);
+    }
+
+    #[test]
+    fn a_rise_seen_only_after_a_reconnect_starts_a_new_discharge() {
+        // Charged in the case while connected elsewhere: no Charging report
+        // reached this host, only the higher level.
+        let mut a = LowBatteryAlerts::default();
+        assert_eq!(a.check(&[left(8)]), [(BatteryComponent::Left, 8)]);
+        assert!(a.check(&[left(25)]).is_empty());
+        assert_eq!(a.check(&[left(20)]), [(BatteryComponent::Left, 20)]);
     }
 
     #[test]
