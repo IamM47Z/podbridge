@@ -277,7 +277,9 @@ impl MediaController {
                 aacp_state.audio_source.as_ref().map(|s| s.mac.clone()),
             )
         };
-        if !worn {
+        // With Automatic Ear Detection off all audio plays to the AirPods,
+        // worn or not (Apple Support 108764).
+        if !worn && self.state.lock().await.ear_detection_enabled {
             info!("{} but buds not in ear, skipping takeover", reason);
             return;
         }

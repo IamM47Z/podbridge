@@ -189,11 +189,19 @@ impl AACPManager {
         let _ = rx.wait_for(|up| !*up).await;
     }
 
-    /// True if at least one bud is in an ear. An empty status (not reported yet,
-    /// or ear detection off on the AirPods) counts as wearing so it never blocks.
+    /// True if at least one bud is in an ear. An empty status (not reported yet)
+    /// counts as wearing so it never blocks. So does Automatic Ear Detection
+    /// off: then all audio plays to the AirPods whether or not they are worn
+    /// (Apple Support 108764).
     pub async fn is_worn(&self) -> bool {
         let state = self.state.lock().await;
-        state.ear_detection_status.is_empty()
+        let ear_detection_off = state
+            .control_command_status_list
+            .iter()
+            .find(|s| s.identifier == ControlCommandIdentifiers::EarDetectionConfig)
+            .is_some_and(|s| !crate::devices::controls::is_on(&s.value));
+        ear_detection_off
+            || state.ear_detection_status.is_empty()
             || state
                 .ear_detection_status
                 .contains(&EarDetectionStatus::InEar)
@@ -1014,6 +1022,27 @@ mod tests {
                 value,
             })) if value == vec![0x02]
         ));
+    }
+
+    /// Apple Support 108764: with Automatic Ear Detection off, all audio plays
+    /// to the AirPods whether or not they are worn.
+    #[tokio::test]
+    async fn ear_detection_off_counts_as_worn() {
+        use super::*;
+        let manager = AACPManager::new();
+        // Both buds out of ear.
+        manager
+            .receive_packet(&frame(&[0x06, 0x00, 0x01, 0x01]))
+            .await;
+        assert!(!manager.is_worn().await);
+        manager
+            .record_control_status(ControlCommandIdentifiers::EarDetectionConfig, 0x02)
+            .await;
+        assert!(manager.is_worn().await);
+        manager
+            .record_control_status(ControlCommandIdentifiers::EarDetectionConfig, 0x01)
+            .await;
+        assert!(!manager.is_worn().await);
     }
 
     /// Characterization: the state and event side effects of each handled
