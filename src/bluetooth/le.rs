@@ -177,6 +177,99 @@ fn notice_lid_open(
     tokio::task::spawn_blocking(move || notify(&summary, &body));
 }
 
+/// True when the advert's connection state byte says the AirPods are not
+/// connected.
+fn advertises_disconnected(apple_data: &[u8]) -> bool {
+    apple_data.get(10) == Some(&0x00)
+}
+
+/// The autoConnect preference for these AirPods: on unless turned off.
+fn auto_connect_enabled(preferences: &HashMap<String, HashMap<String, bool>>, mac: &str) -> bool {
+    preferences
+        .get(mac)
+        .and_then(|prefs| prefs.get("autoConnect"))
+        .copied()
+        .unwrap_or(true)
+}
+
+/// Connect the AirPods when their advert from `addr` says they are
+/// disconnected and auto-connect is on. One attempt per address at a time; a
+/// failed one blocks that address for 30 s, since adverts arrive constantly.
+async fn auto_connect(
+    apple_data: &[u8],
+    airpods_mac: &str,
+    addr: Address,
+    connecting: &Arc<Mutex<HashSet<Address>>>,
+) {
+    debug!("Connection state: {:?}", apple_data.get(10));
+    if !advertises_disconnected(apple_data) {
+        return;
+    }
+    let preferences: HashMap<String, HashMap<String, bool>> =
+        std::fs::read_to_string(get_preferences_path())
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+    let enabled = auto_connect_enabled(&preferences, airpods_mac);
+    debug!("Auto-connect preference for {}: {}", airpods_mac, enabled);
+    if !enabled {
+        debug!(
+            "Auto-connect is disabled for {}, not attempting to connect.",
+            airpods_mac
+        );
+        return;
+    }
+    let mut cm = connecting.lock().await;
+    if !cm.insert(addr) {
+        info!(
+            "Already connecting to {}, skipping duplicate attempt.",
+            airpods_mac
+        );
+        return;
+    }
+    info!(
+        "AirPods are disconnected, attempting to connect to {}",
+        airpods_mac
+    );
+    // bluetoothctl rather than bluer's Device::connect, which did not connect
+    // them.
+    let output = tokio::process::Command::new("bluetoothctl")
+        .arg("connect")
+        .arg(airpods_mac)
+        .output()
+        .await;
+    let connected = matches!(&output, Ok(o) if o.status.success());
+    match output {
+        Ok(output) if output.status.success() => {
+            info!("Successfully connected to AirPods {}", airpods_mac);
+        }
+        Ok(output) => {
+            info!(
+                "Failed to connect to AirPods {}: {}",
+                airpods_mac,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Err(e) => {
+            info!(
+                "Failed to execute bluetoothctl to connect to AirPods {}: {}",
+                airpods_mac, e
+            );
+        }
+    }
+    if connected {
+        cm.remove(&addr);
+    } else {
+        // Retry on a later advert, but not on every one.
+        drop(cm);
+        let connecting = Arc::clone(connecting);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            connecting.lock().await.remove(&addr);
+        });
+    }
+}
+
 // None on a failed read or parse, e.g. mid-write, so the caller keeps its copy.
 fn load_devices() -> Option<HashMap<String, DeviceData>> {
     let json = std::fs::read_to_string(get_devices_path()).ok()?;
@@ -199,7 +292,7 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
 
     let mut verified_macs: HashMap<Address, String> = HashMap::new();
     let mut failed_macs: HashSet<Address> = HashSet::new();
-    let mut listening_macs: HashSet<Address> = HashSet::new();
+    let listening_macs = Arc::new(std::sync::Mutex::new(HashSet::<Address>::new()));
     let connecting_macs = Arc::new(Mutex::new(HashSet::<Address>::new()));
     let lid_notices = Arc::new(std::sync::Mutex::new(LidNotices::default()));
 
@@ -288,13 +381,36 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                 matched_enc_key = Some(enc_key);
             }
 
-            if listening_macs.contains(&addr) {
-                continue;
-            }
-            listening_macs.insert(addr);
-            let mut events = dev.events().await?;
-            // The advert that announced this address raises no PropertyChanged.
+            // One listener per address. Its stream ends when BlueZ removes the
+            // device (adapter powered off, address not seen for a while), and
+            // the listener then forgets the address so it is listened to again.
+            let new_address = listening_macs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(addr);
+            // Subscribe before reading the advert, so no change falls between.
+            let events = if new_address {
+                Some(dev.events().await?)
+            } else {
+                None
+            };
+            // The advert that announced this address raises no PropertyChanged,
+            // and while the adverts stay the same no later one does either.
             let first_data = dev.manufacturer_data().await.ok().flatten();
+            if let Some(apple_data) = first_data.as_ref().and_then(|d| d.get(&76))
+                && apple_data.len() > 20
+            {
+                let apple_data = apple_data.clone();
+                let airpods_mac = matched_airpods_mac.clone();
+                let connecting = Arc::clone(&connecting_macs);
+                tokio::spawn(async move {
+                    auto_connect(&apple_data, &airpods_mac, addr, &connecting).await;
+                });
+            }
+            let Some(mut events) = events else {
+                continue;
+            };
+            let listening = Arc::clone(&listening_macs);
             let name = all_devices
                 .get(&matched_airpods_mac)
                 .map_or_else(|| "AirPods".to_string(), |d| d.name.clone());
@@ -327,8 +443,7 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                 && let Some(last_16) = apple_data.last_chunk::<16>()
                             {
                                 let decrypted = decrypt(enc_key, last_16);
-                                // Before auto-connect: its wait and its `continue` would
-                                // delay or skip the notice.
+                                // Before auto-connect: its wait would delay the notice.
                                 notice_lid_open(
                                     &name,
                                     &matched_airpods_mac,
@@ -344,99 +459,13 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                                     hex::encode(decrypted)
                                 );
 
-                                let connection_state = apple_data[10] as usize;
-                                debug!("Connection state: {}", connection_state);
-                                if connection_state == 0x00 {
-                                    let pref_path = get_preferences_path();
-                                    let preferences: HashMap<String, HashMap<String, bool>> =
-                                        std::fs::read_to_string(&pref_path)
-                                            .ok()
-                                            .and_then(|s| serde_json::from_str(&s).ok())
-                                            .unwrap_or_default();
-                                    let auto_connect = preferences
-                                        .get(&matched_airpods_mac)
-                                        .and_then(|prefs| prefs.get("autoConnect"))
-                                        .copied()
-                                        .unwrap_or(true);
-                                    debug!(
-                                        "Auto-connect preference for {}: {}",
-                                        matched_airpods_mac, auto_connect
-                                    );
-                                    if auto_connect {
-                                        let real_address = addr;
-                                        let mut cm = connecting_macs_clone.lock().await;
-                                        if cm.contains(&real_address) {
-                                            info!(
-                                                "Already connecting to {}, skipping duplicate attempt.",
-                                                matched_airpods_mac
-                                            );
-                                            continue;
-                                        }
-                                        cm.insert(real_address);
-                                        // let adapter_clone = adapter_monitor_clone.clone();
-                                        // let real_device = adapter_clone.device(real_address).unwrap();
-                                        info!(
-                                            "AirPods are disconnected, attempting to connect to {}",
-                                            matched_airpods_mac
-                                        );
-                                        // if let Err(e) = real_device.connect().await {
-                                        //     info!("Failed to connect to AirPods {}: {}", matched_airpods_mac, e);
-                                        // } else {
-                                        //     info!("Successfully connected to AirPods {}", matched_airpods_mac);
-                                        // }
-                                        // call bluetoothctl connect <mac> for now, I don't know why bluer connect isn't working
-                                        let output = tokio::process::Command::new("bluetoothctl")
-                                            .arg("connect")
-                                            .arg(&matched_airpods_mac)
-                                            .output()
-                                            .await;
-                                        let connected =
-                                            matches!(&output, Ok(o) if o.status.success());
-                                        match output {
-                                            Ok(output) => {
-                                                if output.status.success() {
-                                                    info!(
-                                                        "Successfully connected to AirPods {}",
-                                                        matched_airpods_mac
-                                                    );
-                                                } else {
-                                                    let stderr =
-                                                        String::from_utf8_lossy(&output.stderr);
-                                                    info!(
-                                                        "Failed to connect to AirPods {}: {}",
-                                                        matched_airpods_mac, stderr
-                                                    );
-                                                }
-                                            }
-                                            Err(e) => {
-                                                info!(
-                                                    "Failed to execute bluetoothctl to connect to AirPods {}: {}",
-                                                    matched_airpods_mac, e
-                                                );
-                                            }
-                                        }
-                                        if connected {
-                                            cm.remove(&real_address);
-                                        } else {
-                                            // Retry on a later advert, but not on
-                                            // every one: they arrive constantly.
-                                            drop(cm);
-                                            let connecting = Arc::clone(&connecting_macs_clone);
-                                            tokio::spawn(async move {
-                                                tokio::time::sleep(std::time::Duration::from_secs(
-                                                    30,
-                                                ))
-                                                .await;
-                                                connecting.lock().await.remove(&real_address);
-                                            });
-                                        }
-                                    } else {
-                                        debug!(
-                                            "Auto-connect is disabled for {}, not attempting to connect.",
-                                            matched_airpods_mac
-                                        );
-                                    }
-                                }
+                                auto_connect(
+                                    apple_data,
+                                    &matched_airpods_mac,
+                                    addr,
+                                    &connecting_macs_clone,
+                                )
+                                .await;
 
                                 let status = apple_data[5] as usize;
                                 let primary_left = (status >> 5) & 0x01 == 1;
@@ -481,6 +510,11 @@ pub async fn start_le_monitor(tray_handle: Option<ksni::Handle<MyTray>>) -> blue
                         }
                     }
                 }
+                debug!("{} is gone; no longer listening to it", addr);
+                listening
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&addr);
             });
         }
     }
@@ -504,6 +538,29 @@ mod tests {
 
     const IN_CASE: u8 = 0x62;
     const OUT_OF_CASE: u8 = 0x22;
+
+    #[test]
+    fn connection_state_zero_is_disconnected() {
+        let mut data = advert(IN_CASE, 0x01);
+        data[10] = 0x00;
+        assert!(advertises_disconnected(&data));
+        data[10] = 0x04;
+        assert!(!advertises_disconnected(&data));
+        assert!(!advertises_disconnected(&data[..10]));
+    }
+
+    #[test]
+    fn auto_connect_is_on_unless_turned_off() {
+        let mut prefs = HashMap::new();
+        assert!(auto_connect_enabled(&prefs, "AA"));
+        prefs.insert(
+            "AA".to_string(),
+            HashMap::from([("autoConnect".into(), false)]),
+        );
+        prefs.insert("BB".to_string(), HashMap::from([("other".into(), false)]));
+        assert!(!auto_connect_enabled(&prefs, "AA"));
+        assert!(auto_connect_enabled(&prefs, "BB"));
+    }
 
     #[test]
     fn lid_bit_three_clear_is_open() {
