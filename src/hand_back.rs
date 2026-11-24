@@ -4,7 +4,8 @@
 //!
 //! Apple documents only one rule for automatic switching: sound should not
 //! switch during a conversation (a call or video conference). An active mic
-//! or any unpaused stream here blocks the hand-back. Apple does not document
+//! or any unpaused stream here blocks the hand-back. So does media paused by
+//! taking one bud out, which putting it back resumes. Apple does not document
 //! the timing, nor whether the iPhone resumes on its own; the delay below is a
 //! guess the live tests set.
 

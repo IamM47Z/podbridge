@@ -51,6 +51,10 @@ struct MediaControllerState {
     local_mac: String,
     is_playing: bool,
     paused_by_app_services: Vec<String>,
+    /// Taking one bud out paused what plays: putting it back resumes it.
+    /// Only that pause: a stem press or the user's own playback since then
+    /// leaves nothing for the bud to resume.
+    resume_on_reinsert: bool,
     device_index: Option<u32>,
     cached_a2dp_profile: String,
     old_in_ear_data: Vec<bool>,
@@ -89,6 +93,7 @@ impl MediaControllerState {
             local_mac: String::new(),
             is_playing: false,
             paused_by_app_services: Vec::new(),
+            resume_on_reinsert: false,
             device_index: None,
             cached_a2dp_profile: String::new(),
             old_in_ear_data: vec![false, false],
@@ -225,6 +230,7 @@ impl MediaController {
             // just took over, ending with neither side playing.
             if is_playing && !was_playing {
                 let mut state = self.state.lock().await;
+                state.resume_on_reinsert = false;
                 if state.i_paused_the_media {
                     state.i_paused_the_media = false;
                     debug!("Playback resumed after our own pause; not taking ownership");
@@ -365,10 +371,7 @@ impl MediaController {
             (
                 state.hand_back.pending().is_some(),
                 state.ear_detection_enabled
-                    && one_bud_resume_pending(
-                        &state.old_in_ear_data,
-                        &state.paused_by_app_services,
-                    ),
+                    && one_bud_resume_pending(&state.old_in_ear_data, state.resume_on_reinsert),
             )
         };
         // Only read while a hand-back waits: the settings file and the
@@ -497,19 +500,18 @@ impl MediaController {
                 debug!("Nothing playing on the AirPods; not pausing");
                 false
             };
-            if !paused {
-                // Putting the bud back must resume only what this pause
-                // paused, not an older pause (e.g. a stem Play/Pause).
-                self.state.lock().await.paused_by_app_services.clear();
-            }
+            self.state.lock().await.resume_on_reinsert = paused && !actions.forget_paused;
         }
         if actions.forget_paused {
-            self.state.lock().await.paused_by_app_services.clear();
+            let mut state = self.state.lock().await;
+            state.paused_by_app_services.clear();
+            state.resume_on_reinsert = false;
         }
         if actions.activate_a2dp {
             self.activate_a2dp_profile().await;
         }
-        if actions.resume {
+        // Resume only what taking the bud out paused, not an older pause.
+        if actions.resume && std::mem::take(&mut self.state.lock().await.resume_on_reinsert) {
             self.resume().await;
         }
         if actions.deactivate_a2dp {
@@ -850,6 +852,8 @@ impl MediaController {
     /// to whichever player D-Bus lists first once nothing plays, which can
     /// start a different player than the one just paused.
     pub async fn play_pause(&self) {
+        // The user took over playback: a bud going back in must not resume.
+        self.state.lock().await.resume_on_reinsert = false;
         if self.pause().await {
             return;
         }
@@ -1504,8 +1508,8 @@ fn ear_actions(
 
 /// One bud is out and putting it back would resume what removing it paused:
 /// the user is still listening here.
-fn one_bud_resume_pending(in_ear: &[bool], paused: &[String]) -> bool {
-    in_ear.iter().filter(|&&b| b).count() == 1 && !paused.is_empty()
+fn one_bud_resume_pending(in_ear: &[bool], resume_on_reinsert: bool) -> bool {
+    in_ear.iter().filter(|&&b| b).count() == 1 && resume_on_reinsert
 }
 
 #[cfg(test)]
@@ -1575,11 +1579,11 @@ mod tests {
 
     #[test]
     fn one_bud_out_with_a_pending_resume_is_in_use() {
-        let paused = ["org.mpris.MediaPlayer2.spotify".to_string()];
-        assert!(one_bud_resume_pending(&ONE, &paused));
-        assert!(!one_bud_resume_pending(&ONE, &[]));
+        assert!(one_bud_resume_pending(&ONE, true));
+        // A stem pause or the user's own playback cleared the flag.
+        assert!(!one_bud_resume_pending(&ONE, false));
         for in_ear in [BOTH, NONE] {
-            assert!(!one_bud_resume_pending(&in_ear, &paused));
+            assert!(!one_bud_resume_pending(&in_ear, true));
         }
     }
 
