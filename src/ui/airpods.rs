@@ -136,13 +136,19 @@ fn name_section<'a>(
                         let aacp_manager = aacp_manager_for_rename.clone();
                         run_async_in_thread({
                             let new_name = new_name.clone();
+                            let mac = mac.clone();
                             async move {
-                                aacp_manager
-                                    .send_rename_packet(&new_name)
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        log::error!("Failed to send rename packet: {}", e)
-                                    });
+                                match aacp_manager.send_rename_packet(&new_name).await {
+                                    Ok(()) => {
+                                        if let Err(e) =
+                                            crate::bluetooth::discovery::sync_alias(&mac, &new_name)
+                                                .await
+                                        {
+                                            log::error!("Failed to set the BlueZ alias: {}", e);
+                                        }
+                                    }
+                                    Err(e) => log::error!("Failed to send rename packet: {}", e),
+                                }
                             }
                         });
                         let mut state = state.clone();
