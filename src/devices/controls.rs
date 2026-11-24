@@ -1,11 +1,11 @@
 //! Values of the AirPods settings podbridge shows as plain toggles, pickers
-//! and sliders. Every value comes from the librepods Android client
-//! (AACPManager.kt and its settings screens) or its AAP Definitions.md.
+//! and sliders. Every value comes from the librepods Android client:
+//! AACPManager.kt and its settings screens.
 
 use crate::bluetooth::aacp::ControlCommandIdentifiers;
 use std::fmt::Display;
 
-/// A control command toggle's value for on; off is OFF.
+/// The values a control command toggle uses for on and off.
 pub const ON: u8 = 0x01;
 pub const OFF: u8 = 0x02;
 

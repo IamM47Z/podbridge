@@ -249,14 +249,7 @@ fn audio_section<'a>(
         container(
             column![
                 personalized_volume_row(mac, state, aacp_manager),
-                rule::horizontal(1).style(|theme: &Theme| {
-                    rule::Style {
-                        color: theme.palette().text.scale_alpha(0.2),
-                        radius: Radius::from(12),
-                        fill_mode: FillMode::Full,
-                        snap: false,
-                    }
-                }),
+                divider(),
                 conversation_awareness_row(mac, state, aacp_manager, pause_convo)
             ]
             .spacing(4)
@@ -368,8 +361,8 @@ fn off_listening_mode_section<'a>(
     .style(style::card)
 }
 
-/// Apple's AirPods accessibility settings, each shown once the AirPods
-/// report it; the whole section is left out when they report none.
+/// Apple's AirPods accessibility settings. Each row shows once the AirPods
+/// report it. With none reported, the section is left out.
 fn accessibility_section<'a>(mac: &str, state: &AirPodsState) -> Vec<Element<'a, Message>> {
     let rows: Vec<Element<'a, Message>> = [
         setting_toggle(
