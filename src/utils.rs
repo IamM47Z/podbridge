@@ -256,6 +256,9 @@ pub struct AppSettings {
     pub pause_when_one_removed: bool,
     /// Press-and-hold listening modes per AirPods MAC, re-sent on each connect.
     pub press_and_hold_modes: HashMap<String, u8>,
+    /// Settings in controls::STORED chosen on the device page, per AirPods
+    /// MAC: control command identifier to value, re-sent on each connect.
+    pub stored_controls: HashMap<String, HashMap<u8, u8>>,
     /// After taking the AirPods from another device, give them back once
     /// nothing here has used them for a while (see hand_back.rs).
     pub hand_back_when_idle: bool,
@@ -283,6 +286,7 @@ impl Default for AppSettings {
             audio_off_when_not_wearing: true,
             pause_when_one_removed: true,
             press_and_hold_modes: HashMap::new(),
+            stored_controls: HashMap::new(),
             hand_back_when_idle: true,
             convo_restore_pending: false,
             conv_volume_restore: None,

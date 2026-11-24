@@ -56,6 +56,7 @@ impl AirPodsDevice {
             enable_stem_press_detection(&aacp_manager).await;
         }
         restore_press_and_hold_modes(&aacp_manager, &mac_address.to_string()).await;
+        restore_stored_controls(&aacp_manager, &mac_address.to_string()).await;
 
         let media_controller = Arc::new(Mutex::new(MediaController::new(
             mac_address.to_string(),
@@ -207,6 +208,31 @@ async fn restore_press_and_hold_modes(aacp_manager: &AACPManager, mac: &str) {
                 .await
         }
         Err(e) => error!("Failed to restore press-and-hold modes: {}", e),
+    }
+}
+
+/// Send the stored choices of settings some AirPods never report (see
+/// controls::STORED) again, and record them so the backend and the page
+/// follow them.
+async fn restore_stored_controls(aacp_manager: &AACPManager, mac: &str) {
+    let Some(stored) = crate::utils::AppSettings::load()
+        .stored_controls
+        .remove(mac)
+    else {
+        return;
+    };
+    for (identifier, _) in controls::STORED {
+        let Some(&value) = stored.get(&(identifier as u8)) else {
+            continue;
+        };
+        info!("Restoring {:?} {:#04x}", identifier, value);
+        match aacp_manager
+            .send_control_command(identifier, &[value])
+            .await
+        {
+            Ok(()) => aacp_manager.record_control_status(identifier, value).await,
+            Err(e) => error!("Failed to restore {:?}: {}", identifier, e),
+        }
     }
 }
 

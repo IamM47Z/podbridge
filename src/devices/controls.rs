@@ -69,6 +69,25 @@ pub fn find_choice(choices: &[Choice], value: u8) -> Option<Choice> {
     choices.iter().find(|c| c.value == value).copied()
 }
 
+/// Settings some AirPods never report, such as AirPods Pro 2 with ear
+/// detection (0x0A) and the microphone (0x01). podbridge stores the choice
+/// per device and sends it again on each connect. Until there is a report or
+/// a choice, the page shows the Android client's default: ear detection on
+/// (its "automatic_ear_detection" preference defaults to true), microphone
+/// automatic (it reads a missing 0x01 as 0x00).
+pub const STORED: [(ControlCommandIdentifiers, u8); 2] = [
+    (ControlCommandIdentifiers::EarDetectionConfig, ON),
+    (ControlCommandIdentifiers::MicMode, 0x00),
+];
+
+/// The default of a setting podbridge stores; None for any other setting.
+pub fn stored_default(identifier: ControlCommandIdentifiers) -> Option<u8> {
+    STORED
+        .iter()
+        .find(|(id, _)| *id == identifier)
+        .map(|&(_, default)| default)
+}
+
 /// The highest chime volume the Android client's slider sends.
 pub const MAX_CHIME_VOLUME: u8 = 100;
 
@@ -132,6 +151,28 @@ mod tests {
         assert_eq!(find_choice(&PRESS_SPEEDS, 0x03), None);
         // The swipe interval starts at 1: 0 is not one of its values.
         assert_eq!(find_choice(&VOLUME_SWIPE_INTERVALS, 0x00), None);
+    }
+
+    #[test]
+    fn unreported_connection_settings_default_like_android() {
+        assert_eq!(
+            stored_default(ControlCommandIdentifiers::EarDetectionConfig),
+            Some(ON)
+        );
+        assert_eq!(
+            stored_default(ControlCommandIdentifiers::MicMode),
+            Some(0x00)
+        );
+        assert_eq!(find_choice(&MIC_MODES, 0x00).unwrap().name, "Automatic");
+    }
+
+    #[test]
+    fn reported_settings_are_not_stored() {
+        assert_eq!(stored_default(ControlCommandIdentifiers::ChimeVolume), None);
+        assert_eq!(
+            stored_default(ControlCommandIdentifiers::OneBudAncMode),
+            None
+        );
     }
 
     #[test]

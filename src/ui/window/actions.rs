@@ -66,6 +66,14 @@ impl App {
         if let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) {
             state.record_setting(identifier, &[value]);
         }
+        if controls::stored_default(identifier).is_some() {
+            crate::utils::AppSettings::update(|s| {
+                s.stored_controls
+                    .entry(mac.clone())
+                    .or_default()
+                    .insert(identifier as u8, value);
+            });
+        }
         self.send_control_command(&mac, identifier, value)
     }
 
