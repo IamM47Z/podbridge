@@ -845,8 +845,9 @@ fn refresh_desktop_default_source(runtime: &tokio::runtime::Handle) {
 // virtual mic is kept: across short disconnects, with no bud worn, and across
 // podbridge restarts (a new run adopts the loaded module). It is unloaded when
 // the hi-res mic is turned off, and when the AirPods stayed gone past
-// DISCONNECT_PARK_DELAY while no app records from any mic: a mic without
-// AirPods should not stay listed. The next connection creates it again, which
+// DISCONNECT_PARK_DELAY while no app records from any mic, or when podbridge
+// starts without AirPods and finds it left over: a mic without AirPods should
+// not stay listed. The next connection creates it again, which
 // an app recording from another mic at that moment can still trip over.
 //
 // While the AirPods can't deliver mic audio the mic is "parked": another mic
@@ -1122,6 +1123,30 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
     });
 }
 
+/// Whether a leftover mic is removed: only when nothing records, since a mic
+/// disappearing under a recording app can abort it (see the section comment).
+fn remove_leftover(leftover: bool, recording: bool) -> bool {
+    leftover && !recording
+}
+
+/// podbridge started without AirPods and an earlier run left the mic loaded:
+/// remove it like release_mic does after a disconnect. Blocking.
+pub fn remove_leftover_mic() {
+    if !remove_leftover(output::leftover_module(), output::any_recorder()) {
+        return;
+    }
+    // An earlier run may have parked it already; keep that state so the next
+    // connection restores the default mic.
+    if load_parked().is_none() {
+        save_parked(Some(&park()));
+    }
+    info!(
+        "[hires] no AirPods and nothing records; removing leftover '{}'",
+        output::SOURCE_NAME
+    );
+    output::unload_leftover();
+}
+
 /// The hi-res mic was turned off: unload the virtual mic. Blocking.
 fn remove_mic() {
     let mic = shared_mic().take();
@@ -1346,8 +1371,15 @@ fn spawn_decode_thread(
 
 #[cfg(test)]
 mod tests {
-    use super::{CaptureAction, Parked, capture_action, carried_over};
+    use super::{CaptureAction, Parked, capture_action, carried_over, remove_leftover};
     use crate::audio::output::Recorder;
+
+    #[test]
+    fn leftover_mic_is_removed_only_when_nothing_records() {
+        assert!(remove_leftover(true, false));
+        assert!(!remove_leftover(true, true));
+        assert!(!remove_leftover(false, false));
+    }
 
     #[test]
     fn parked_state_round_trips() {

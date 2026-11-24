@@ -480,6 +480,7 @@ async fn setup_connected_airpods(adapter: &bluer::Adapter, backend: &Backend) {
         Ok(device) => device,
         Err(_) => {
             info!("No connected AirPods found.");
+            let _ = tokio::task::spawn_blocking(crate::audio::hires_mic::remove_leftover_mic).await;
             return;
         }
     };

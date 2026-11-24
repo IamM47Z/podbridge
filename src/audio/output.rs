@@ -574,6 +574,17 @@ fn our_modules() -> Vec<(u32, String)> {
     found.borrow().clone()
 }
 
+/// Whether a hi-res mic module is loaded, e.g. one left by an earlier run.
+pub fn leftover_module() -> bool {
+    !our_modules().is_empty()
+}
+
+/// Unload every hi-res mic module and its FIFO.
+pub fn unload_leftover() {
+    unload_stale_modules();
+    let _ = std::fs::remove_file(fifo_path());
+}
+
 fn unload_stale_modules() {
     for (index, _) in our_modules() {
         warn!("[pw] unloading stale hi-res module {}", index);
