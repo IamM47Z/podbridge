@@ -1140,6 +1140,10 @@ pub fn remove_leftover_mic() {
     if load_parked().is_none() {
         save_parked(Some(&park()));
     }
+    // park() takes a moment; an app may have started recording meanwhile.
+    if output::any_recorder() {
+        return;
+    }
     info!(
         "[hires] no AirPods and nothing records; removing leftover '{}'",
         output::SOURCE_NAME
