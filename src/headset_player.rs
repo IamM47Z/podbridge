@@ -180,16 +180,22 @@ fn is_connected_airpods(connected: bool, uuids: &[String]) -> bool {
     connected && uuids.iter().any(|u| u.eq_ignore_ascii_case(&airpods))
 }
 
-/// None when BlueZ does not answer.
-fn airpods_connected(system: &Connection) -> Option<bool> {
+/// Whether this BlueZ object path is a device of `adapter`.
+fn on_adapter(path: &str, adapter: &str) -> bool {
+    path.starts_with(&format!("/org/bluez/{adapter}/"))
+}
+
+/// Whether AirPods are connected to `adapter`. None when BlueZ does not answer.
+fn airpods_connected(system: &Connection, adapter: &str) -> Option<bool> {
     let objects = system
         .with_proxy("org.bluez", "/", Duration::from_secs(5))
         .get_managed_objects()
         .ok()?;
     Some(
         objects
-            .values()
-            .filter_map(|interfaces| interfaces.get("org.bluez.Device1"))
+            .iter()
+            .filter(|(path, _)| on_adapter(path, adapter))
+            .filter_map(|(_, interfaces)| interfaces.get("org.bluez.Device1"))
             .any(|device| {
                 let connected = prop_cast::<bool>(device, "Connected").copied();
                 prop_cast::<Vec<String>>(device, "UUIDs")
@@ -265,18 +271,20 @@ fn run(adapter: &str) -> Result<(), dbus::Error> {
 
         if looked.is_none_or(|at| at.elapsed() >= LOOK_EVERY) {
             looked = Some(Instant::now());
-            airpods = airpods_connected(&system).unwrap_or(airpods);
+            airpods = airpods_connected(&system, adapter).unwrap_or(airpods);
         }
         let due = tried.is_none_or(|at| at.elapsed() >= REGISTER_EVERY);
         match registration(airpods, registered, due) {
             Registration::Register => {
                 tried = Some(Instant::now());
-                match register(&system, adapter, state) {
+                match register(&system, adapter) {
                     Ok(()) => {
                         info!("Headsets on {adapter} now see podbridge's media player");
                         registered = true;
                         refused = false;
-                        reported = Some(state);
+                        // Registered as stopped: the real state follows as a
+                        // change, which BlueZ passes to connected headsets.
+                        reported = Some(Playback::Stopped);
                     }
                     Err(e) if e.name() == Some("org.bluez.Error.AlreadyExists") => {
                         registered = true;
@@ -338,9 +346,10 @@ fn read_players(session: &Connection) -> Vec<Player> {
         .collect()
 }
 
-/// BlueZ takes the properties from this call and then follows our signals.
-fn register(system: &Connection, adapter: &str, state: Playback) -> Result<(), dbus::Error> {
-    let mut properties = status_property(state);
+/// BlueZ takes the properties from this call and then follows our signals. It
+/// tells connected headsets about changes only, not about these first values.
+fn register(system: &Connection, adapter: &str) -> Result<(), dbus::Error> {
+    let mut properties = status_property(Playback::Stopped);
     // BlueZ drops the buttons of a player that does not claim them.
     for flag in [
         "CanControl",
@@ -434,6 +443,14 @@ mod tests {
         assert_eq!(registration(false, true, false), Withdraw);
         assert_eq!(registration(false, true, true), Withdraw);
         assert_eq!(registration(false, false, true), Keep);
+    }
+
+    #[test]
+    fn only_devices_of_our_adapter_count() {
+        let device = "/org/bluez/hci1/dev_74_77_86_83_74_C0";
+        assert!(on_adapter(device, "hci1"));
+        assert!(!on_adapter(device, "hci0"));
+        assert!(!on_adapter("/org/bluez/hci10/dev_00", "hci1"));
     }
 
     #[test]

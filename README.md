@@ -21,9 +21,9 @@ Other distributions: download the binary or the AppImage from the
 While your AirPods are connected, podbridge is the media player Bluetooth
 headsets see. They learn whether something plays here, so AirPods send pause or
 play as it fits. Their play, pause, next and previous buttons reach podbridge
-instead of your desktop's media keys. During that time this also covers every
-other headset on the adapter. Without AirPods, their buttons go to your desktop
-as usual.
+instead of your desktop's media keys. Meanwhile the buttons of every other
+headset on the adapter reach podbridge too. Without AirPods, their buttons go
+to your desktop as usual.
 
 Play pauses while something plays, because some speakers send nothing else.
 Pause never starts anything.
