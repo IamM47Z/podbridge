@@ -80,37 +80,39 @@ fn playback(players: &[Player]) -> Playback {
 /// playerctld's name for the most recently active player.
 const LATEST_PLAYER: &str = "org.mpris.MediaPlayer2.playerctld";
 
+/// The players that play. playerctld only mirrors one of them, and can lag.
+fn playing(players: &[Player]) -> impl Iterator<Item = &Player> {
+    players
+        .iter()
+        .filter(|p| p.status == Playback::Playing && p.service != LATEST_PLAYER)
+}
+
 /// What the buttons remember between presses.
 #[derive(Default)]
 struct Buttons {
     /// The players the last Pause stopped.
     paused: Vec<String>,
+    /// The player last heard playing, for desktops without playerctld.
+    last_heard: Option<String>,
 }
 
 impl Buttons {
     /// Forget the paused players once something else plays: Play then belongs
     /// to what the user chose since.
     fn observe(&mut self, players: &[Player]) {
-        let something_else = players.iter().any(|player| {
-            player.status == Playback::Playing && !self.paused.contains(&player.service)
-        });
-        if something_else {
+        if playing(players).any(|p| !self.paused.contains(&p.service)) {
             self.paused.clear();
+        }
+        if let Some(player) = playing(players).next() {
+            self.last_heard = Some(player.service.clone());
         }
     }
 
     /// The MPRIS calls a button stands for, as (service, method).
     fn press(&mut self, button: Button, players: &[Player]) -> Vec<(String, &'static str)> {
-        let playing = || {
-            players
-                .iter()
-                .filter(|player| player.status == Playback::Playing)
-        };
-        let latest = || {
-            players
-                .iter()
-                .find(|player| player.service == LATEST_PLAYER)
-        };
+        let named = |service: &str| players.iter().find(|p| p.service == service);
+        // Where a button goes when nothing plays.
+        let latest = named(LATEST_PLAYER).or(self.last_heard.as_deref().and_then(named));
         let one = |player: Option<&Player>, method| {
             player
                 .map(|player| (player.service.clone(), method))
@@ -119,13 +121,13 @@ impl Buttons {
         };
         match button {
             Button::Pause => {
-                let stopping: Vec<String> = playing().map(|p| p.service.clone()).collect();
+                let stopping: Vec<String> = playing(players).map(|p| p.service.clone()).collect();
                 if !stopping.is_empty() {
                     self.paused = stopping.clone();
                 }
                 stopping.into_iter().map(|s| (s, "Pause")).collect()
             }
-            Button::Play if playing().next().is_some() => Vec::new(),
+            Button::Play if playing(players).next().is_some() => Vec::new(),
             Button::Play => {
                 let resume: Vec<_> = std::mem::take(&mut self.paused)
                     .into_iter()
@@ -136,7 +138,7 @@ impl Buttons {
                     return resume;
                 }
                 let paused = players.iter().find(|p| p.status == Playback::Paused);
-                one(latest().or(paused).or(players.first()), "Play")
+                one(latest.or(paused).or(players.first()), "Play")
             }
             Button::Next | Button::Previous => {
                 let method = if button == Button::Next {
@@ -144,7 +146,8 @@ impl Buttons {
                 } else {
                     "Previous"
                 };
-                one(playing().next().or(latest()).or(players.first()), method)
+                let target = playing(players).next().or(latest).or(players.first());
+                one(target, method)
             }
         }
     }
@@ -360,10 +363,51 @@ mod tests {
     #[test]
     fn pause_stops_everything_that_plays() {
         use Playback::*;
-        let now = players(&[(MUSIC, Playing), (VIDEO, Paused), (LATEST, Playing)]);
+        // playerctld only mirrors another player: pausing that one is enough.
+        let now = players(&[(MUSIC, Playing), (VIDEO, Playing), (LATEST, Playing)]);
         assert_eq!(
             Buttons::default().press(Button::Pause, &now),
-            calls(&[(MUSIC, "Pause"), (LATEST, "Pause")])
+            calls(&[(MUSIC, "Pause"), (VIDEO, "Pause")])
+        );
+    }
+
+    #[test]
+    fn a_mirror_slow_to_report_the_pause_keeps_the_memory() {
+        use Playback::*;
+        let mut buttons = Buttons::default();
+        buttons.press(
+            Button::Pause,
+            &players(&[(VIDEO, Playing), (LATEST, Playing)]),
+        );
+        buttons.observe(&players(&[(VIDEO, Paused), (LATEST, Playing)]));
+        let quiet = players(&[(MUSIC, Paused), (VIDEO, Paused), (LATEST, Paused)]);
+        assert_eq!(
+            buttons.press(Button::Play, &quiet),
+            calls(&[(VIDEO, "Play")])
+        );
+    }
+
+    #[test]
+    fn without_playerctld_buttons_go_to_the_player_heard_last() {
+        use Playback::*;
+        let mut buttons = Buttons::default();
+        // Paused elsewhere: from the desktop, or by a bud coming out.
+        buttons.observe(&players(&[(VIDEO, Paused), (MUSIC, Playing)]));
+        let quiet = players(&[(VIDEO, Paused), (MUSIC, Paused)]);
+        buttons.observe(&quiet);
+        assert_eq!(
+            buttons.press(Button::Play, &quiet),
+            calls(&[(MUSIC, "Play")])
+        );
+        assert_eq!(
+            buttons.press(Button::Next, &quiet),
+            calls(&[(MUSIC, "Next")])
+        );
+        // Gone since: fall back to what is left.
+        let left = players(&[(VIDEO, Paused)]);
+        assert_eq!(
+            buttons.press(Button::Play, &left),
+            calls(&[(VIDEO, "Play")])
         );
     }
 
