@@ -98,8 +98,6 @@ pub struct App {
     slider_generations: HashMap<ControlCommandIdentifiers, u64>,
     /// Bumped on each keystroke in a device's name box; only the last one's timer sends.
     name_generations: HashMap<String, u64>,
-    /// The name last sent to each device, until the devices file shows it.
-    sent_names: HashMap<String, String>,
 }
 
 pub struct BluetoothState {
@@ -254,7 +252,6 @@ impl App {
                 pending_add_device: None,
                 slider_generations: HashMap::new(),
                 name_generations: HashMap::new(),
-                sent_names: HashMap::new(),
                 device_type_state: combo_box::State::new(vec![DeviceType::Nothing]),
                 selected_device_type: None,
                 device_managers,
