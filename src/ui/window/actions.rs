@@ -149,16 +149,16 @@ impl App {
 
     /// Rename the AirPods and their BlueZ alias, then the devices file so the
     /// device list shows the name without a reconnect.
-    fn send_name(&mut self, mac: String) -> Task<Message> {
+    fn send_name(&self, mac: String) -> Task<Message> {
         let Some(DeviceState::AirPods(state)) = self.device_states.get(&mac) else {
             return Task::none();
         };
         let name = state.device_name.clone();
-        let current = self.sent_names.get(&mac).cloned().or_else(|| {
-            super::read_devices_list()
-                .get(&mac)
-                .map(|device| device.name.clone())
-        });
+        // The devices file is only updated after a send succeeded, so a failed
+        // send can be tried again.
+        let current = super::read_devices_list()
+            .get(&mac)
+            .map(|device| device.name.clone());
         if !name_needs_sending(&name, current.as_deref()) {
             return Task::none();
         }
@@ -170,7 +170,6 @@ impl App {
         else {
             return Task::none();
         };
-        self.sent_names.insert(mac.clone(), name.clone());
         Task::perform(
             async move {
                 if let Err(e) = aacp.send_rename_packet(&name).await {
