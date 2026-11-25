@@ -134,23 +134,7 @@ fn name_section<'a>(
                     let state = state.clone();
                     move |new_name| {
                         let aacp_manager = aacp_manager_for_rename.clone();
-                        run_async_in_thread({
-                            let new_name = new_name.clone();
-                            let mac = mac.clone();
-                            async move {
-                                match aacp_manager.send_rename_packet(&new_name).await {
-                                    Ok(()) => {
-                                        if let Err(e) =
-                                            crate::bluetooth::discovery::sync_alias(&mac, &new_name)
-                                                .await
-                                        {
-                                            log::error!("Failed to set the BlueZ alias: {}", e);
-                                        }
-                                    }
-                                    Err(e) => log::error!("Failed to send rename packet: {}", e),
-                                }
-                            }
-                        });
+                        run_async_in_thread(rename(aacp_manager, mac.clone(), new_name.clone()));
                         let mut state = state.clone();
                         state.device_name = new_name.clone();
                         Message::StateChanged(mac.to_string(), DeviceState::AirPods(state))
@@ -161,6 +145,33 @@ fn name_section<'a>(
     )
     .padding(Padding::from([5.0, 10.0]))
     .style(style::card)
+}
+
+/// The newest name typed and not yet sent.
+static PENDING_NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static RENAME_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Rename the AirPods and their BlueZ alias. Each keystroke starts one of
+/// these on its own thread, unordered, so they take turns and each sends the
+/// newest pending name: the last write is always the latest name typed.
+async fn rename(aacp_manager: Arc<AACPManager>, mac: String, name: String) {
+    *PENDING_NAME.lock().unwrap_or_else(|e| e.into_inner()) = Some(name);
+    let _turn = RENAME_TURN.lock().await;
+    // None: an earlier turn already sent this name or a newer one.
+    let Some(name) = PENDING_NAME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    else {
+        return;
+    };
+    if let Err(e) = aacp_manager.send_rename_packet(&name).await {
+        error!("Failed to send rename packet: {}", e);
+        return;
+    }
+    if let Err(e) = crate::bluetooth::discovery::sync_alias(&mac, &name).await {
+        error!("Failed to set the BlueZ alias: {}", e);
+    }
 }
 
 fn listening_mode_section<'a>(
