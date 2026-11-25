@@ -32,7 +32,7 @@ pub fn airpods_view<'a>(
 ) -> Element<'a, Message> {
     // Like Apple's AirPods page: the essentials first, the rest in sections
     // that stay collapsed until opened.
-    let essentials = column![name_section(mac, state, &aacp_manager)]
+    let essentials = column![name_section(mac, state)]
         .extend(battery_section(state))
         .push(listening_mode_section(mac, state, &aacp_manager));
 
@@ -105,13 +105,9 @@ fn battery_section<'a>(state: &AirPodsState) -> Option<Element<'a, Message>> {
     )
 }
 
-fn name_section<'a>(
-    mac: &str,
-    state: &'a AirPodsState,
-    aacp_manager: &Arc<AACPManager>,
-) -> Container<'a, Message> {
-    let aacp_manager_for_rename = aacp_manager.clone();
+fn name_section<'a>(mac: &str, state: &'a AirPodsState) -> Container<'a, Message> {
     let mac = mac.to_string();
+    let mac_for_submit = mac.clone();
     container(
         row![
             Space::new().width(10),
@@ -130,48 +126,13 @@ fn name_section<'a>(
                     }
                 })
                 .align_x(End)
-                .on_input({
-                    let state = state.clone();
-                    move |new_name| {
-                        let aacp_manager = aacp_manager_for_rename.clone();
-                        run_async_in_thread(rename(aacp_manager, mac.clone(), new_name.clone()));
-                        let mut state = state.clone();
-                        state.device_name = new_name.clone();
-                        Message::StateChanged(mac.to_string(), DeviceState::AirPods(state))
-                    }
-                })
+                .on_input(move |new_name| Message::NameEdited(mac.clone(), new_name))
+                .on_submit(Message::NameSubmitted(mac_for_submit))
         ]
         .align_y(Center),
     )
     .padding(Padding::from([5.0, 10.0]))
     .style(style::card)
-}
-
-/// The newest name typed and not yet sent.
-static PENDING_NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-static RENAME_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-/// Rename the AirPods and their BlueZ alias. Each keystroke starts one of
-/// these on its own thread, unordered, so they take turns and each sends the
-/// newest pending name: the last write is always the latest name typed.
-async fn rename(aacp_manager: Arc<AACPManager>, mac: String, name: String) {
-    *PENDING_NAME.lock().unwrap_or_else(|e| e.into_inner()) = Some(name);
-    let _turn = RENAME_TURN.lock().await;
-    // None: an earlier turn already sent this name or a newer one.
-    let Some(name) = PENDING_NAME
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    else {
-        return;
-    };
-    if let Err(e) = aacp_manager.send_rename_packet(&name).await {
-        error!("Failed to send rename packet: {}", e);
-        return;
-    }
-    if let Err(e) = crate::bluetooth::discovery::sync_alias(&mac, &name).await {
-        error!("Failed to set the BlueZ alias: {}", e);
-    }
 }
 
 fn listening_mode_section<'a>(

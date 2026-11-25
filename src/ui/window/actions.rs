@@ -14,6 +14,16 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 const SLIDER_DEBOUNCE: Duration = Duration::from_millis(300);
+/// How long the name box rests before its text is sent as the new name. Apple
+/// commits on Return or on leaving the field; iced reports no blur, so this
+/// stands in for it.
+const NAME_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// Whether `name` is worth sending: not empty, and not the name the device
+/// already has (`current`).
+fn name_needs_sending(name: &str, current: Option<&str>) -> bool {
+    !name.trim().is_empty() && current != Some(name)
+}
 
 impl App {
     pub(super) fn got_paired_devices(&mut self, map: HashMap<String, Address>) -> Task<Message> {
@@ -110,6 +120,84 @@ impl App {
         self.send_control_command(mac, identifier, value)
     }
 
+    /// Show the typed name at once; send it on Enter or once typing has been
+    /// still for NAME_DEBOUNCE, whichever comes first.
+    pub(super) fn name_edited(&mut self, mac: String, name: String) -> Task<Message> {
+        if let Some(DeviceState::AirPods(state)) = self.device_states.get_mut(&mac) {
+            state.device_name = name;
+        }
+        let generation = self.name_generations.entry(mac.clone()).or_default();
+        *generation += 1;
+        let generation = *generation;
+        Task::perform(tokio::time::sleep(NAME_DEBOUNCE), move |_| {
+            Message::NameSettled(mac.clone(), generation)
+        })
+    }
+
+    pub(super) fn name_settled(&mut self, mac: String, generation: u64) -> Task<Message> {
+        if self.name_generations.get(&mac) != Some(&generation) {
+            return Task::none();
+        }
+        self.send_name(mac)
+    }
+
+    pub(super) fn name_submitted(&mut self, mac: String) -> Task<Message> {
+        // Makes the pending timer stale, so the name is not sent twice.
+        *self.name_generations.entry(mac.clone()).or_default() += 1;
+        self.send_name(mac)
+    }
+
+    /// Rename the AirPods and their BlueZ alias, then the devices file so the
+    /// device list shows the name without a reconnect.
+    fn send_name(&mut self, mac: String) -> Task<Message> {
+        let Some(DeviceState::AirPods(state)) = self.device_states.get(&mac) else {
+            return Task::none();
+        };
+        let name = state.device_name.clone();
+        let current = self.sent_names.get(&mac).cloned().or_else(|| {
+            super::read_devices_list()
+                .get(&mac)
+                .map(|device| device.name.clone())
+        });
+        if !name_needs_sending(&name, current.as_deref()) {
+            return Task::none();
+        }
+        let Some(aacp) = self
+            .device_managers
+            .blocking_read()
+            .get(&mac)
+            .and_then(|m| m.get_aacp())
+        else {
+            return Task::none();
+        };
+        self.sent_names.insert(mac.clone(), name.clone());
+        Task::perform(
+            async move {
+                if let Err(e) = aacp.send_rename_packet(&name).await {
+                    error!("Failed to send rename packet: {}", e);
+                    return;
+                }
+                if let Err(e) = crate::bluetooth::discovery::sync_alias(&mac, &name).await {
+                    error!("Failed to set the BlueZ alias: {}", e);
+                }
+                let saved = tokio::task::spawn_blocking(move || {
+                    crate::utils::update_devices(|devices| match devices.get_mut(&mac) {
+                        Some(device) if device.name != name => {
+                            device.name = name;
+                            true
+                        }
+                        _ => false,
+                    })
+                })
+                .await;
+                if let Err(e) = saved {
+                    error!("Failed to save the new name: {}", e);
+                }
+            },
+            |_| Message::Bluetooth(BluetoothUIMessage::NoOp),
+        )
+    }
+
     /// Flip one press-and-hold mode, unless that would leave fewer than two.
     /// The choice is stored so the next connect sends it again: the AirPods
     /// reset it when they join an Apple device that is not iCloud-synced.
@@ -180,5 +268,23 @@ impl App {
                 combo_box::State::new(noise_control_modes(state.allow_off_mode));
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_is_sent_when_new_and_not_empty() {
+        assert!(name_needs_sending("Pods", Some("Old")));
+        assert!(name_needs_sending("Pods", None));
+    }
+
+    #[test]
+    fn name_is_skipped_when_unchanged_or_empty() {
+        assert!(!name_needs_sending("Pods", Some("Pods")));
+        assert!(!name_needs_sending("", Some("Old")));
+        assert!(!name_needs_sending("  ", None));
     }
 }
