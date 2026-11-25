@@ -75,8 +75,8 @@ struct MediaControllerState {
     /// Desktop default-device refresh done for this connection.
     default_refreshed: bool,
     /// When the AirPods were last claimed from other devices (see
-    /// take_over_audio); None once another device uses them or their audio is
-    /// switched off here.
+    /// take_over_audio); None once another device uses them, their audio is
+    /// switched off here, or the claim was released when idle.
     last_takeover: Option<std::time::Instant>,
     /// The AirPods disconnected: delayed work for this connection must not act
     /// any more (a new connection has its own controller).
@@ -84,8 +84,8 @@ struct MediaControllerState {
     /// We paused the local players (ownership lost): their own resume
     /// afterwards is not the user starting playback.
     i_paused_the_media: bool,
-    /// Gives the AirPods back to the device they were taken from once this
-    /// computer stops using them.
+    /// Releases this computer's claim on the AirPods once nothing here uses
+    /// them. A device they were taken from gets them back.
     hand_back: HandBack,
 }
 
@@ -414,8 +414,8 @@ impl MediaController {
     /// them for HAND_BACK_AFTER (see hand_back.rs). A device they were taken
     /// from gets them back: ownership and the audio profile are released as
     /// when the other device asks for them. Otherwise only ownership is
-    /// dropped. The audio stays connected, so playing here again resumes at
-    /// once, and losing them to another device still drops it.
+    /// dropped. The audio profile stays connected, so playing here again
+    /// resumes at once. Losing them to another device still drops it.
     async fn hand_back_when_idle(
         &self,
         aacp_manager: &AACPManager,
@@ -441,7 +441,7 @@ impl MediaController {
                     && one_bud_resume_pending(&state.old_in_ear_data, state.resume_on_reinsert),
             )
         };
-        // Only read while an idle claim waits for release: the settings file
+        // Only read while this computer holds an idle claim: the settings file
         // and the PulseAudio connection below cost a little on every poll.
         let settings = (holds && !in_use_here).then(crate::utils::AppSettings::load);
         // Turned off counts as in use: nothing is handed back, and no idle
@@ -1513,7 +1513,8 @@ fn clear_pending_conv_volume() {
 }
 
 /// A takeover within this long of the previous one is skipped (unless another
-/// device used the AirPods in between, or their audio was switched off here).
+/// device used the AirPods in between, their audio was switched off here, or
+/// the claim was released when idle).
 const TAKEOVER_REPEAT_GUARD: Duration = Duration::from_secs(30);
 /// 1 s attempts at switching the card off while it doesn't exist yet.
 const CARD_OFF_ATTEMPTS: u32 = 10;

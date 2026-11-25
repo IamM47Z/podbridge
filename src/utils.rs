@@ -259,8 +259,8 @@ pub struct AppSettings {
     /// Settings in controls::STORED chosen on the device page, per AirPods
     /// MAC: control command identifier to value, re-sent on each connect.
     pub stored_controls: HashMap<String, HashMap<u8, u8>>,
-    /// After taking the AirPods from another device, give them back once
-    /// nothing here has used them for a while (see hand_back.rs).
+    /// Release this computer's claim on the AirPods once nothing here has
+    /// used them for a while (see hand_back.rs).
     pub hand_back_when_idle: bool,
     /// Conversation awareness was switched off for a mic capture and couldn't
     /// be switched back on before the AirPods disconnected.

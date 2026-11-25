@@ -45,8 +45,8 @@ impl App {
                     Message::PauseWhenOneRemovedChanged,
                 ),
                 plain_toggle(
-                    "Hand AirPods back when done",
-                    "After this computer took the AirPods from your iPhone or another device, give them back once nothing here has played or used the mic for 30 seconds. Never during a call.",
+                    "Release AirPods when done",
+                    "Once nothing here has played or used the mic for 30 seconds, let other devices take the AirPods. A device they were taken from gets them back. Never during a call.",
                     self.hand_back_when_idle,
                     Message::HandBackWhenIdleChanged,
                 ),

@@ -1,8 +1,8 @@
 //! Automatic hand-back: once nothing here has used the AirPods for a while,
 //! give up this computer's claim on them so another device (an iPhone) can
 //! have them without a tug of war. A device they were taken from gets them
-//! back. Otherwise, as after a manual connect, the claim is only dropped, the
-//! way an idle Mac behaves: the next device to play takes them.
+//! back. Otherwise only the claim is dropped, as an idle Mac does. The next
+//! device to play takes them.
 //!
 //! Apple documents only one rule for automatic switching: sound should not
 //! switch during a conversation (a call or video conference). An active mic
