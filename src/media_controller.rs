@@ -1796,7 +1796,7 @@ fn ear_actions(
 }
 
 /// playerctld only mirrors another player, and can report its state late.
-const PLAYERCTLD: &str = "org.mpris.MediaPlayer2.playerctld";
+pub(crate) const PLAYERCTLD: &str = "org.mpris.MediaPlayer2.playerctld";
 
 /// Whether any of these (service, status) players plays.
 fn any_plays<S: AsRef<str>, T: AsRef<str>>(players: impl IntoIterator<Item = (S, T)>) -> bool {

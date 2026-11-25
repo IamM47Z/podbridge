@@ -13,7 +13,7 @@ use dbus::channel::{MatchingReceiver, Sender};
 use dbus::message::{MatchRule, SignalArgs};
 use log::{info, warn};
 
-use crate::media_controller::MediaController;
+use crate::media_controller::{MediaController, PLAYERCTLD as LATEST_PLAYER};
 
 /// Our player's object on the system bus.
 const PATH: &str = "/org/podbridge/player";
@@ -76,9 +76,6 @@ fn playback(players: &[Player]) -> Playback {
         Playback::Stopped
     }
 }
-
-/// playerctld's name for the most recently active player.
-const LATEST_PLAYER: &str = "org.mpris.MediaPlayer2.playerctld";
 
 /// The players that play. playerctld only mirrors one of them, and can lag.
 fn playing(players: &[Player]) -> impl Iterator<Item = &Player> {
