@@ -335,8 +335,8 @@ pub struct PlayingStream {
     pub stream: SavedStream,
     /// The sink it plays to now.
     pub sink: Option<String>,
-    /// Pinned to a sink (`target.object`, set by the user or the app) instead
-    /// of following the default output.
+    /// Pinned to a sink (`target.object` in PipeWire's metadata, e.g. after
+    /// the user moved the stream) instead of following the default output.
     pub pinned: bool,
 }
 
@@ -346,6 +346,9 @@ pub struct PlaybackRouting {
     /// The output the user picked (PipeWire's configured default, kept while
     /// that sink is gone), else the current default.
     pub default_sink: Option<String>,
+    /// `default_sink` is the configured default. Without it, a default that
+    /// is gone (the AirPods with their card off) can't be seen.
+    pub default_configured: bool,
     pub playing: Vec<PlayingStream>,
 }
 
@@ -355,7 +358,8 @@ pub fn playback_routing() -> Option<PlaybackRouting> {
     // The pulse protocol shows neither the configured default nor which
     // streams are pinned: PipeWire keeps both in its "default" metadata.
     // Without pw-metadata (e.g. in the Flatpak) every stream counts as
-    // following the current default.
+    // following the current default, and the media controller remembers
+    // whether the AirPods were the default when it switched their card off.
     let metadata = std::process::Command::new("pw-metadata")
         .output()
         .ok()
@@ -423,6 +427,7 @@ pub fn playback_routing() -> Option<PlaybackRouting> {
     }
     let playing = playing.borrow().clone();
     Some(PlaybackRouting {
+        default_configured: metadata.configured_sink.is_some(),
         default_sink: metadata
             .configured_sink
             .or_else(|| default_sink.borrow().clone()),
