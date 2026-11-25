@@ -6,13 +6,16 @@
 use std::time::{Duration, Instant};
 
 use dbus::Message;
-use dbus::arg::{PropMap, Variant};
-use dbus::blocking::Connection;
-use dbus::blocking::stdintf::org_freedesktop_dbus::{Properties, PropertiesPropertiesChanged};
+use dbus::arg::{PropMap, Variant, prop_cast};
+use dbus::blocking::stdintf::org_freedesktop_dbus::{
+    ObjectManager, Properties, PropertiesPropertiesChanged,
+};
+use dbus::blocking::{Connection, Proxy};
 use dbus::channel::{MatchingReceiver, Sender};
 use dbus::message::{MatchRule, SignalArgs};
 use log::{info, warn};
 
+use crate::bluetooth::discovery::AIRPODS_UUID;
 use crate::media_controller::{MediaController, PLAYERCTLD as LATEST_PLAYER};
 
 /// Our player's object on the system bus.
@@ -22,6 +25,8 @@ const PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
 const POLL: Duration = Duration::from_millis(500);
 /// BlueZ forgets the player when it restarts or the adapter is replugged.
 const REGISTER_EVERY: Duration = Duration::from_secs(10);
+/// How often BlueZ is asked whether AirPods are connected.
+const LOOK_EVERY: Duration = Duration::from_secs(2);
 
 /// The state reported to headsets, as MPRIS spells it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -151,6 +156,48 @@ impl Buttons {
     }
 }
 
+/// What to do about our registration with BlueZ.
+#[derive(Debug, PartialEq)]
+enum Registration {
+    Register,
+    Withdraw,
+    Keep,
+}
+
+/// We are the headsets' player only while AirPods are connected. `due` is set
+/// when the last attempt is old enough to repeat.
+fn registration(airpods: bool, registered: bool, due: bool) -> Registration {
+    match (airpods, registered) {
+        (false, true) => Registration::Withdraw,
+        (true, _) if due => Registration::Register,
+        _ => Registration::Keep,
+    }
+}
+
+/// Whether a BlueZ device is a pair of AirPods connected now.
+fn is_connected_airpods(connected: bool, uuids: &[String]) -> bool {
+    let airpods = AIRPODS_UUID.to_string();
+    connected && uuids.iter().any(|u| u.eq_ignore_ascii_case(&airpods))
+}
+
+/// None when BlueZ does not answer.
+fn airpods_connected(system: &Connection) -> Option<bool> {
+    let objects = system
+        .with_proxy("org.bluez", "/", Duration::from_secs(5))
+        .get_managed_objects()
+        .ok()?;
+    Some(
+        objects
+            .values()
+            .filter_map(|interfaces| interfaces.get("org.bluez.Device1"))
+            .any(|device| {
+                let connected = prop_cast::<bool>(device, "Connected").copied();
+                prop_cast::<Vec<String>>(device, "UUIDs")
+                    .is_some_and(|uuids| is_connected_airpods(connected.unwrap_or(false), uuids))
+            }),
+    )
+}
+
 /// The button BlueZ forwards with this call to our player.
 fn button(message: &Message) -> Option<Button> {
     if message.path().as_deref() != Some(PATH)
@@ -167,7 +214,7 @@ fn button(message: &Message) -> Option<Button> {
     }
 }
 
-/// Show the headsets on `adapter` a media player for as long as we run.
+/// Show the headsets on `adapter` a media player while AirPods are connected.
 pub fn spawn(adapter: &str) {
     let adapter = adapter.to_string();
     std::thread::spawn(move || {
@@ -208,27 +255,49 @@ fn run(adapter: &str) -> Result<(), dbus::Error> {
     let mut reported = None;
     let mut tried: Option<Instant> = None;
     let mut refused = false;
+    let mut registered = false;
+    let mut airpods = false;
+    let mut looked: Option<Instant> = None;
     loop {
         let players = read_players(&session);
         buttons.observe(&players);
         let state = playback(&players);
 
-        if tried.is_none_or(|at| at.elapsed() >= REGISTER_EVERY) {
-            tried = Some(Instant::now());
-            match register(&system, adapter, state) {
-                Ok(()) => {
-                    info!("Headsets on {adapter} now see podbridge's media player");
-                    refused = false;
-                    reported = Some(state);
-                }
-                Err(e) if e.name() == Some("org.bluez.Error.AlreadyExists") => {}
-                Err(e) => {
-                    if !refused {
-                        warn!("BlueZ did not take the media player: {e}");
+        if looked.is_none_or(|at| at.elapsed() >= LOOK_EVERY) {
+            looked = Some(Instant::now());
+            airpods = airpods_connected(&system).unwrap_or(airpods);
+        }
+        let due = tried.is_none_or(|at| at.elapsed() >= REGISTER_EVERY);
+        match registration(airpods, registered, due) {
+            Registration::Register => {
+                tried = Some(Instant::now());
+                match register(&system, adapter, state) {
+                    Ok(()) => {
+                        info!("Headsets on {adapter} now see podbridge's media player");
+                        registered = true;
+                        refused = false;
+                        reported = Some(state);
                     }
-                    refused = true;
+                    Err(e) if e.name() == Some("org.bluez.Error.AlreadyExists") => {
+                        registered = true;
+                    }
+                    Err(e) => {
+                        if !refused {
+                            warn!("BlueZ did not take the media player: {e}");
+                        }
+                        registered = false;
+                        refused = true;
+                    }
                 }
             }
+            Registration::Withdraw => {
+                // BlueZ may have forgotten us already: nothing to undo then.
+                let _ = unregister(&system, adapter);
+                info!("AirPods gone; headset buttons are back with the desktop");
+                registered = false;
+                tried = None;
+            }
+            Registration::Keep => {}
         }
         if reported != Some(state) {
             announce(&system, state);
@@ -286,17 +355,28 @@ fn register(system: &Connection, adapter: &str, state: Playback) -> Result<(), d
         "Identity".to_string(),
         Variant(Box::new("podbridge".to_string())),
     );
-    system
-        .with_proxy(
-            "org.bluez",
-            format!("/org/bluez/{adapter}"),
-            Duration::from_secs(5),
-        )
-        .method_call(
-            "org.bluez.Media1",
-            "RegisterPlayer",
-            (dbus::Path::from(PATH), properties),
-        )
+    media(system, adapter).method_call(
+        "org.bluez.Media1",
+        "RegisterPlayer",
+        (dbus::Path::from(PATH), properties),
+    )
+}
+
+fn unregister(system: &Connection, adapter: &str) -> Result<(), dbus::Error> {
+    media(system, adapter).method_call(
+        "org.bluez.Media1",
+        "UnregisterPlayer",
+        (dbus::Path::from(PATH),),
+    )
+}
+
+/// BlueZ's media object of the adapter.
+fn media<'a>(system: &'a Connection, adapter: &str) -> Proxy<'a, &'a Connection> {
+    system.with_proxy(
+        "org.bluez",
+        format!("/org/bluez/{adapter}"),
+        Duration::from_secs(5),
+    )
 }
 
 fn status_property(state: Playback) -> PropMap {
@@ -341,6 +421,29 @@ mod tests {
         list.iter()
             .map(|&(service, method)| (service.to_string(), method))
             .collect()
+    }
+
+    #[test]
+    fn the_player_is_registered_only_while_airpods_are_connected() {
+        use Registration::*;
+        assert_eq!(registration(true, false, true), Register);
+        // Repeated now and then: a restarted BlueZ forgets us.
+        assert_eq!(registration(true, true, true), Register);
+        assert_eq!(registration(true, true, false), Keep);
+        assert_eq!(registration(true, false, false), Keep);
+        assert_eq!(registration(false, true, false), Withdraw);
+        assert_eq!(registration(false, true, true), Withdraw);
+        assert_eq!(registration(false, false, true), Keep);
+    }
+
+    #[test]
+    fn airpods_count_only_while_connected() {
+        let airpods = ["74EC2172-0BAD-4D01-8F77-997B2BE0722A".to_string()];
+        let speaker = ["0000110b-0000-1000-8000-00805f9b34fb".to_string()];
+        assert!(is_connected_airpods(true, &airpods));
+        assert!(!is_connected_airpods(false, &airpods));
+        assert!(!is_connected_airpods(true, &speaker));
+        assert!(!is_connected_airpods(true, &[]));
     }
 
     #[test]

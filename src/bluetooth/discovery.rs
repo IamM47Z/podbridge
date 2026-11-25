@@ -2,16 +2,17 @@ use bluer::Adapter;
 use log::debug;
 use std::io::Error;
 
-pub(crate) async fn find_connected_airpods(adapter: &Adapter) -> bluer::Result<bluer::Device> {
-    let target_uuid = uuid::uuid!("74ec2172-0bad-4d01-8f77-997b2be0722a");
+/// The service only AirPods and their Beats relatives offer.
+pub(crate) const AIRPODS_UUID: uuid::Uuid = uuid::uuid!("74ec2172-0bad-4d01-8f77-997b2be0722a");
 
+pub(crate) async fn find_connected_airpods(adapter: &Adapter) -> bluer::Result<bluer::Device> {
     let addrs = adapter.device_addresses().await?;
     for addr in addrs {
         let device = adapter.device(addr)?;
         if device.is_connected().await.unwrap_or(false)
             && let Ok(uuids) = device.uuids().await
             && let Some(uuids) = uuids
-            && uuids.iter().any(|u| *u == target_uuid)
+            && uuids.iter().any(|u| *u == AIRPODS_UUID)
         {
             return Ok(device);
         }

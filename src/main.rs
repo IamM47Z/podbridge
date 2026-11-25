@@ -393,7 +393,7 @@ impl ConnectionWatcher {
             debug!("{}: could not read its UUIDs; ignoring the change", path);
             return;
         };
-        let target_uuid = "74ec2172-0bad-4d01-8f77-997b2be0722a";
+        let target_uuid = bluetooth::discovery::AIRPODS_UUID.to_string();
 
         let Ok(addr_str) = proxy.get::<String>("org.bluez.Device1", "Address") else {
             debug!("{}: could not read its address; ignoring the change", path);
