@@ -62,6 +62,9 @@ struct MediaControllerState {
     /// Playback streams that were on the AirPods when we switched the card off,
     /// moved back when the card comes back.
     saved_streams: Vec<card::SavedStream>,
+    /// The AirPods were the default output when we switched the card off;
+    /// cleared when it comes back.
+    airpods_were_default: bool,
     conv_original_volume: Option<u32>,
     conv_conversation_started: bool,
     playback_listener_running: bool,
@@ -99,6 +102,7 @@ impl MediaControllerState {
             old_in_ear_data: vec![false, false],
             ear_detection_enabled: true,
             saved_streams: Vec::new(),
+            airpods_were_default: false,
             mic_was_active: false,
             other_was_active: false,
             default_refreshed: false,
@@ -273,11 +277,12 @@ impl MediaController {
     /// Whether what plays here now will be heard on the AirPods once they are
     /// claimed (see playback_goes_to_airpods). Logs `event` when not.
     async fn heard_on_airpods(&self, event: &str) -> bool {
-        let (mac, saved) = {
+        let (mac, saved, were_default) = {
             let state = self.state.lock().await;
             (
                 state.connected_device_mac.clone(),
                 state.saved_streams.clone(),
+                state.airpods_were_default,
             )
         };
         let Some(routing) = tokio::task::spawn_blocking(card::playback_routing)
@@ -291,7 +296,11 @@ impl MediaController {
             );
             return true;
         };
-        if playback_goes_to_airpods(&routing, &saved, |sink| is_airpods_sink(sink, &mac)) {
+        // Only needed when PipeWire's configured default can't be read.
+        let were_default = were_default && !routing.default_configured;
+        if playback_goes_to_airpods(&routing, &saved, were_default, |sink| {
+            is_airpods_sink(sink, &mac)
+        }) {
             return true;
         }
         let mut outputs: Vec<&str> = routing
@@ -1129,6 +1138,15 @@ impl MediaController {
             debug!("Saving {} stream(s) to move back later", streams.len());
             self.state.lock().await.saved_streams = streams;
         }
+        // Whether new playback here goes to the AirPods while they are off.
+        let mac = self.state.lock().await.connected_device_mac.clone();
+        let were_default = tokio::task::spawn_blocking(card::playback_routing)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.default_sink)
+            .is_some_and(|sink| is_airpods_sink(&sink, &mac));
+        self.state.lock().await.airpods_were_default = were_default;
 
         info!("Deactivating A2DP profile for AirPods by setting to off");
 
@@ -1494,7 +1512,11 @@ const AUDIO_OFF_DEBOUNCE: Duration = card::NOT_WORN_GRACE;
 impl MediaController {
     /// Move streams saved at deactivation back onto the AirPods' sink.
     async fn restore_saved_streams(&self, card_index: u32) {
-        let streams = std::mem::take(&mut self.state.lock().await.saved_streams);
+        let streams = {
+            let mut state = self.state.lock().await;
+            state.airpods_were_default = false;
+            std::mem::take(&mut state.saved_streams)
+        };
         if streams.is_empty() {
             return;
         }
@@ -1505,20 +1527,23 @@ impl MediaController {
     }
 }
 
-/// Whether playback will be heard on the AirPods once they are claimed: a
-/// playing stream is on their sink, will be moved back to it (`saved`), or
-/// follows the default output and the default is the AirPods. While their
-/// card has no sink (off, headset profile), `routing.default_sink` still names
-/// them if the user picked them. With no stream up yet, the player's new stream
-/// follows the default.
-// shortcut: any playing stream counts, not only the player that just started;
-// matching MPRIS players to streams (by process id) would narrow it.
+/// Whether playback will be heard on the AirPods once they are claimed. That
+/// holds when a playing stream is on their sink or is saved to move back. It
+/// also holds when a stream follows the default output and the default is the
+/// AirPods. While their card has no sink (off, headset profile), a configured
+/// default still names them. Without one, `were_default` says whether they
+/// were the default when their card went off. With no stream up yet, the
+/// player's new stream follows the default.
+// shortcut: any playing stream counts, not only the player that just started.
+// Matching MPRIS players to streams by process id would narrow it.
 fn playback_goes_to_airpods(
     routing: &card::PlaybackRouting,
     saved: &[card::SavedStream],
+    were_default: bool,
     is_airpods: impl Fn(&str) -> bool,
 ) -> bool {
-    let default_is_airpods = routing.default_sink.as_deref().is_some_and(&is_airpods);
+    let default_is_airpods =
+        were_default || routing.default_sink.as_deref().is_some_and(&is_airpods);
     if routing.playing.is_empty() {
         return default_is_airpods;
     }
@@ -1561,9 +1586,28 @@ mod routing_tests {
     fn goes(default: Option<&str>, playing: Vec<PlayingStream>, saved: &[SavedStream]) -> bool {
         let routing = PlaybackRouting {
             default_sink: default.map(str::to_string),
+            default_configured: true,
             playing,
         };
-        playback_goes_to_airpods(&routing, saved, |s| is_airpods_sink(s, MAC))
+        playback_goes_to_airpods(&routing, saved, false, |s| is_airpods_sink(s, MAC))
+    }
+
+    #[test]
+    fn without_a_configured_default_the_airpods_were_default_when_switched_off() {
+        // E.g. the Flatpak: the current default is the fallback speaker.
+        let routing = PlaybackRouting {
+            default_sink: Some(SPEAKER.to_string()),
+            default_configured: false,
+            playing: vec![stream(1, Some(SPEAKER), false)],
+        };
+        let is_airpods = |s: &str| is_airpods_sink(s, MAC);
+        assert!(playback_goes_to_airpods(&routing, &[], true, is_airpods));
+        assert!(!playback_goes_to_airpods(&routing, &[], false, is_airpods));
+        let pinned = PlaybackRouting {
+            playing: vec![stream(1, Some(SPEAKER), true)],
+            ..routing
+        };
+        assert!(!playback_goes_to_airpods(&pinned, &[], true, is_airpods));
     }
 
     #[test]
