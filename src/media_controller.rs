@@ -830,6 +830,12 @@ impl MediaController {
         }
     }
 
+    /// This computer no longer owns the AirPods: an idle period has nothing
+    /// to release.
+    pub async fn forget_claim(&self) {
+        self.state.lock().await.hand_back.released();
+    }
+
     pub async fn pause_all_media(&self) {
         debug!("Pausing all media (without tracking for resume)");
 

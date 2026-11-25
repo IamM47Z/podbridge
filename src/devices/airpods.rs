@@ -333,6 +333,7 @@ async fn spawn_ownership_watch(
             if !owns {
                 info!("Lost ownership, pausing media and disconnecting audio");
                 let controller = media_controller.lock().await;
+                controller.forget_claim().await;
                 controller.pause_all_media().await;
                 controller.deactivate_a2dp_profile().await;
             }
@@ -454,6 +455,7 @@ impl EventLoop {
                     .command_tx
                     .send((ControlCommandIdentifiers::OwnsConnection, vec![0x00]));
                 let controller = self.media_controller.lock().await;
+                controller.forget_claim().await;
                 controller.pause_all_media().await;
                 controller.deactivate_a2dp_profile().await;
             }
