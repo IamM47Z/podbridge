@@ -127,7 +127,8 @@ impl Buttons {
                 }
                 stopping.into_iter().map(|s| (s, "Pause")).collect()
             }
-            Button::Play if playing(players).next().is_some() => Vec::new(),
+            // A speaker with one button sends Play even while we play.
+            Button::Play if playing(players).next().is_some() => self.press(Button::Pause, players),
             Button::Play => {
                 let resume: Vec<_> = std::mem::take(&mut self.paused)
                     .into_iter()
@@ -440,10 +441,22 @@ mod tests {
     }
 
     #[test]
-    fn play_never_pauses() {
+    fn play_while_something_plays_pauses_it_and_the_next_resumes() {
         use Playback::*;
+        // A speaker with one button sends Play every time.
+        let mut buttons = Buttons::default();
         let now = players(&[(MUSIC, Playing), (VIDEO, Paused)]);
-        assert_eq!(Buttons::default().press(Button::Play, &now), calls(&[]));
+        assert_eq!(
+            buttons.press(Button::Play, &now),
+            calls(&[(MUSIC, "Pause")])
+        );
+        let quiet = players(&[(VIDEO, Paused), (MUSIC, Paused)]);
+        assert_eq!(
+            buttons.press(Button::Play, &quiet),
+            calls(&[(MUSIC, "Play")])
+        );
+        // Pause alone never starts anything.
+        assert_eq!(buttons.press(Button::Pause, &quiet), calls(&[]));
     }
 
     #[test]

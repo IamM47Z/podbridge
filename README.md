@@ -23,6 +23,9 @@ learn whether something plays here, so AirPods send pause or play as it fits.
 Their play, pause, next and previous buttons reach podbridge instead of your
 desktop's media keys. This covers every headset on the adapter.
 
+Play pauses while something plays, because some speakers send nothing else.
+Pause never starts anything.
+
 Leave `mpris-proxy` and WirePlumber's `bluez5.dummy-avrcp-player` off: BlueZ
 uses only the player registered first.
 
