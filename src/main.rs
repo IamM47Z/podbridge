@@ -2,6 +2,7 @@ mod audio;
 mod bluetooth;
 mod devices;
 mod hand_back;
+mod headset_player;
 mod media_controller;
 mod ui;
 mod utils;
@@ -152,6 +153,7 @@ async fn async_main(
     let adapter = wait_for_adapter(&session).await?;
     adapter.set_powered(true).await?;
     let local_mac = adapter.address().await?.to_string();
+    headset_player::spawn(adapter.name());
 
     spawn_le_monitor(tray_handle.clone());
 

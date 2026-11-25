@@ -16,6 +16,16 @@ Other distributions: download the binary or the AppImage from the
 2.39 or later. The binary also needs D-Bus and the PulseAudio client library
 (`libpulse`). FFmpeg is built in.
 
+## Headset buttons
+
+While it runs, podbridge is the media player your Bluetooth headsets see. They
+learn whether something plays here, so AirPods send pause or play as it fits.
+Their play, pause, next and previous buttons reach podbridge instead of your
+desktop's media keys. This covers every headset on the adapter.
+
+Leave `mpris-proxy` and WirePlumber's `bluez5.dummy-avrcp-player` off: BlueZ
+uses only the player registered first.
+
 ## Build
 
 Needs Rust, `pkg-config`, D-Bus, PulseAudio client and FFmpeg development

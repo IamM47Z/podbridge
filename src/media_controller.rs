@@ -1500,7 +1500,7 @@ impl MediaController {
             .unwrap_or(true)
     }
 
-    fn list_mpris_services(conn: &Connection) -> Vec<String> {
+    pub(crate) fn list_mpris_services(conn: &Connection) -> Vec<String> {
         let proxy = conn.with_proxy(
             "org.freedesktop.DBus",
             "/org/freedesktop/DBus",
