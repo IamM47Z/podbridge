@@ -96,6 +96,10 @@ pub struct App {
     sidebar_open: bool,
     /// Bumped on each move of a setting's slider; only its last move sends.
     slider_generations: HashMap<ControlCommandIdentifiers, u64>,
+    /// Bumped on each keystroke in a device's name box; only the last one's timer sends.
+    name_generations: HashMap<String, u64>,
+    /// The name last sent to each device, until the devices file shows it.
+    sent_names: HashMap<String, String>,
 }
 
 pub struct BluetoothState {
@@ -134,6 +138,12 @@ pub enum Message {
     SliderSettled(String, ControlCommandIdentifiers, u8, u64),
     /// A press-and-hold listening mode checkbox was clicked (mac, mode bit).
     PressAndHoldToggled(String, u8),
+    /// The name box changed (mac, text): shown at once, sent later.
+    NameEdited(String, String),
+    /// The pause after a keystroke in the name box ran out (mac, generation).
+    NameSettled(String, u64),
+    /// Enter was pressed in the name box (mac).
+    NameSubmitted(String),
     TrayTextModeChanged(bool), // yes, I know I should add all settings to a struct, but I'm lazy
     StemControlChanged(bool),
     StemDoublePressChanged(StemAction),
@@ -243,6 +253,8 @@ impl App {
                 device_states,
                 pending_add_device: None,
                 slider_generations: HashMap::new(),
+                name_generations: HashMap::new(),
+                sent_names: HashMap::new(),
                 device_type_state: combo_box::State::new(vec![DeviceType::Nothing]),
                 selected_device_type: None,
                 device_managers,
@@ -354,6 +366,9 @@ impl App {
             Message::SliderSettled(mac, identifier, value, generation) => {
                 self.slider_settled(&mac, identifier, value, generation)
             }
+            Message::NameEdited(mac, name) => self.name_edited(mac, name),
+            Message::NameSettled(mac, generation) => self.name_settled(mac, generation),
+            Message::NameSubmitted(mac) => self.name_submitted(mac),
             Message::PressAndHoldToggled(mac, mode) => self.press_and_hold_toggled(mac, mode),
             Message::ThemeSelected(theme) => self.change_setting(|app| app.selected_theme = theme),
             Message::TrayTextModeChanged(on) => self.change_setting(|app| app.tray_text_mode = on),
