@@ -238,13 +238,25 @@ impl MediaController {
                 }
             }
 
-            if !was_playing && is_playing {
+            // Only playback heard on the AirPods claims them (Apple Support
+            // 108764): music sent to a speaker must not take them from the
+            // iPhone.
+            let playback_started =
+                !was_playing && is_playing && self.heard_on_airpods("Media playback started").await;
+            if playback_started {
                 self.take_over_audio(&aacp_manager, &control_tx, "Media playback started")
                     .await;
             } else if !was_mic_active && mic_active {
                 self.take_over_audio(&aacp_manager, &control_tx, "Hi-res mic started")
                     .await;
-            } else if other_was_active && !other_active && (mic_active || is_playing) {
+            } else if other_was_active
+                && !other_active
+                && (mic_active
+                    || (is_playing
+                        && self
+                            .heard_on_airpods("Other device released the AirPods during playback")
+                            .await))
+            {
                 // E.g. a phone call on an iPhone took the AirPods in the middle
                 // of a voice call here. When it ends nothing else would bring
                 // them back: the mic never stopped, so there is no new start.
@@ -256,6 +268,46 @@ impl MediaController {
                 .await;
             }
         }
+    }
+
+    /// Whether what plays here now will be heard on the AirPods once they are
+    /// claimed (see playback_goes_to_airpods). Logs `event` when not.
+    async fn heard_on_airpods(&self, event: &str) -> bool {
+        let (mac, saved) = {
+            let state = self.state.lock().await;
+            (
+                state.connected_device_mac.clone(),
+                state.saved_streams.clone(),
+            )
+        };
+        let Some(routing) = tokio::task::spawn_blocking(card::playback_routing)
+            .await
+            .unwrap_or(None)
+        else {
+            // Can't tell: claim them, as before this check existed.
+            debug!(
+                "{}; could not read the audio routing, assuming the AirPods",
+                event
+            );
+            return true;
+        };
+        if playback_goes_to_airpods(&routing, &saved, |sink| is_airpods_sink(sink, &mac)) {
+            return true;
+        }
+        let mut outputs: Vec<&str> = routing
+            .playing
+            .iter()
+            .filter_map(|p| p.sink.as_deref())
+            .collect();
+        if outputs.is_empty() {
+            outputs.extend(routing.default_sink.as_deref());
+        }
+        info!(
+            "{} on another output ({}), not taking the AirPods",
+            event,
+            outputs.join(", ")
+        );
+        false
     }
 
     /// Claim the AirPods for this computer: tell them we own the connection,
@@ -479,7 +531,8 @@ impl MediaController {
         if actions.activate_a2dp && other_device_active {
             // Putting a bud in must not pull the AirPods away from another device
             // that is playing or in a call (that would bypass the ownership
-            // handover). Playing media or joining a call here still takes over.
+            // handover). Playing media to the AirPods or joining a call here
+            // still takes over.
             info!("Another device is using the AirPods; not switching audio here");
             actions.activate_a2dp = false;
             actions.resume = false;
@@ -1449,6 +1502,154 @@ impl MediaController {
             card::move_streams_to_card(&streams, card_index, Duration::from_secs(3))
         })
         .await;
+    }
+}
+
+/// Whether playback will be heard on the AirPods once they are claimed: a
+/// playing stream is on their sink, will be moved back to it (`saved`), or
+/// follows the default output and the default is the AirPods. While their
+/// card has no sink (off, headset profile), `routing.default_sink` still names
+/// them if the user picked them. With no stream up yet, the player's new stream
+/// follows the default.
+// shortcut: any playing stream counts, not only the player that just started;
+// matching MPRIS players to streams (by process id) would narrow it.
+fn playback_goes_to_airpods(
+    routing: &card::PlaybackRouting,
+    saved: &[card::SavedStream],
+    is_airpods: impl Fn(&str) -> bool,
+) -> bool {
+    let default_is_airpods = routing.default_sink.as_deref().is_some_and(&is_airpods);
+    if routing.playing.is_empty() {
+        return default_is_airpods;
+    }
+    routing.playing.iter().any(|p| {
+        p.sink.as_deref().is_some_and(&is_airpods)
+            || saved.contains(&p.stream)
+            || (!p.pinned && default_is_airpods)
+    })
+}
+
+/// PipeWire and PulseAudio name Bluetooth sinks after the device address,
+/// e.g. `bluez_output.74_77_86_83_74_C0.1`.
+fn is_airpods_sink(sink: &str, mac: &str) -> bool {
+    !mac.is_empty()
+        && sink
+            .to_ascii_uppercase()
+            .contains(&mac.replace(':', "_").to_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    use card::{PlaybackRouting, PlayingStream, SavedStream};
+
+    const MAC: &str = "74:77:86:83:74:C0";
+    const AIRPODS: &str = "bluez_output.74_77_86_83_74_C0.1";
+    const SPEAKER: &str = "bluez_output.24_C4_06_94_4B_E1.1";
+
+    fn stream(index: u32, sink: Option<&str>, pinned: bool) -> PlayingStream {
+        PlayingStream {
+            stream: SavedStream {
+                index,
+                app: Some("Cider".to_string()),
+            },
+            sink: sink.map(str::to_string),
+            pinned,
+        }
+    }
+
+    fn goes(default: Option<&str>, playing: Vec<PlayingStream>, saved: &[SavedStream]) -> bool {
+        let routing = PlaybackRouting {
+            default_sink: default.map(str::to_string),
+            playing,
+        };
+        playback_goes_to_airpods(&routing, saved, |s| is_airpods_sink(s, MAC))
+    }
+
+    #[test]
+    fn stream_on_the_airpods_sink() {
+        assert!(goes(
+            Some(SPEAKER),
+            vec![stream(1, Some(AIRPODS), true)],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn stream_on_another_sink_with_another_default() {
+        // The live case: music to a speaker that is also the default.
+        assert!(!goes(
+            Some(SPEAKER),
+            vec![stream(1, Some(SPEAKER), false)],
+            &[]
+        ));
+        assert!(!goes(
+            Some(SPEAKER),
+            vec![stream(1, Some(SPEAKER), true)],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn stream_pinned_elsewhere_while_the_airpods_are_default() {
+        assert!(!goes(
+            Some(AIRPODS),
+            vec![stream(1, Some(SPEAKER), true)],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn stream_following_a_default_airpods_without_a_sink() {
+        // Card off: the stream sits on the fallback until the AirPods return.
+        assert!(goes(
+            Some(AIRPODS),
+            vec![stream(1, Some(SPEAKER), false)],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn stream_moved_off_the_airpods_comes_back() {
+        let saved = [SavedStream {
+            index: 1,
+            app: Some("Cider".to_string()),
+        }];
+        assert!(goes(
+            Some(SPEAKER),
+            vec![stream(1, Some(SPEAKER), true)],
+            &saved
+        ));
+    }
+
+    #[test]
+    fn no_stream_yet_follows_the_default() {
+        assert!(goes(Some(AIRPODS), vec![], &[]));
+        assert!(!goes(Some(SPEAKER), vec![], &[]));
+        assert!(!goes(None, vec![], &[]));
+    }
+
+    #[test]
+    fn any_stream_heard_on_the_airpods_counts() {
+        assert!(goes(
+            Some(SPEAKER),
+            vec![
+                stream(1, Some(SPEAKER), false),
+                stream(2, Some(AIRPODS), false)
+            ],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn airpods_sink_names() {
+        assert!(is_airpods_sink(AIRPODS, MAC));
+        assert!(is_airpods_sink(
+            "bluez_sink.74_77_86_83_74_c0.a2dp_sink",
+            MAC
+        ));
+        assert!(!is_airpods_sink(SPEAKER, MAC));
+        assert!(!is_airpods_sink(AIRPODS, ""));
     }
 }
 

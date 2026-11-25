@@ -329,6 +329,147 @@ pub fn streams_on_card(card_index: u32) -> Vec<SavedStream> {
         .collect()
 }
 
+/// A playing (uncorked) playback stream and where its sound goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayingStream {
+    pub stream: SavedStream,
+    /// The sink it plays to now.
+    pub sink: Option<String>,
+    /// Pinned to a sink (`target.object`, set by the user or the app) instead
+    /// of following the default output.
+    pub pinned: bool,
+}
+
+/// Where playback goes right now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PlaybackRouting {
+    /// The output the user picked (PipeWire's configured default, kept while
+    /// that sink is gone), else the current default.
+    pub default_sink: Option<String>,
+    pub playing: Vec<PlayingStream>,
+}
+
+/// Snapshot of the playing streams and the default output. None if the sound
+/// server can't be asked.
+pub fn playback_routing() -> Option<PlaybackRouting> {
+    // The pulse protocol shows neither the configured default nor which
+    // streams are pinned: PipeWire keeps both in its "default" metadata.
+    // Without pw-metadata (e.g. in the Flatpak) every stream counts as
+    // following the current default.
+    let metadata = std::process::Command::new("pw-metadata")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| parse_pw_metadata(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+    let (mut mainloop, context) = connect()?;
+    let introspect = context.introspect();
+    let default_sink: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let op = introspect.get_server_info({
+        let default_sink = default_sink.clone();
+        move |info| {
+            *default_sink.borrow_mut() = info.default_sink_name.as_ref().map(|n| n.to_string());
+        }
+    });
+    let mut done = wait_op(&mut mainloop, &op);
+    let sinks: Rc<RefCell<Vec<(u32, String)>>> = Rc::new(RefCell::new(Vec::new()));
+    let op = introspect.get_sink_info_list({
+        let sinks = sinks.clone();
+        move |result| {
+            if let ListResult::Item(item) = result
+                && let Some(name) = item.name.as_ref()
+            {
+                sinks.borrow_mut().push((item.index, name.to_string()));
+            }
+        }
+    });
+    done &= wait_op(&mut mainloop, &op);
+    let playing: Rc<RefCell<Vec<PlayingStream>>> = Rc::new(RefCell::new(Vec::new()));
+    let op = introspect.get_sink_input_info_list({
+        let playing = playing.clone();
+        let sinks = sinks.clone();
+        move |result| {
+            if let ListResult::Item(item) = result
+                && !item.corked
+            {
+                let app = item
+                    .proplist
+                    .get_str("application.name")
+                    .or_else(|| item.name.as_ref().map(|n| n.to_string()));
+                // Metadata is keyed by PipeWire node id, not the pulse index.
+                let node = item
+                    .proplist
+                    .get_str("object.id")
+                    .and_then(|id| id.parse::<u32>().ok());
+                playing.borrow_mut().push(PlayingStream {
+                    stream: SavedStream {
+                        index: item.index,
+                        app,
+                    },
+                    sink: sinks
+                        .borrow()
+                        .iter()
+                        .find(|(i, _)| *i == item.sink)
+                        .map(|(_, n)| n.clone()),
+                    pinned: node.is_some_and(|n| metadata.pinned.contains(&n)),
+                });
+            }
+        }
+    });
+    done &= wait_op(&mut mainloop, &op);
+    drop(op);
+    if !done {
+        return None;
+    }
+    let playing = playing.borrow().clone();
+    Some(PlaybackRouting {
+        default_sink: metadata
+            .configured_sink
+            .or_else(|| default_sink.borrow().clone()),
+        playing,
+    })
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PwMetadata {
+    configured_sink: Option<String>,
+    /// Node ids of streams with a target.
+    pinned: Vec<u32>,
+}
+
+/// Parse `pw-metadata` output, lines such as
+/// `update: id:152 key:'target.object' value:'7179' type:'Spa:Id'`.
+fn parse_pw_metadata(text: &str) -> PwMetadata {
+    let mut out = PwMetadata::default();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("update: id:") else {
+            continue;
+        };
+        let Some((id, rest)) = rest.split_once(" key:'") else {
+            continue;
+        };
+        let Some((key, rest)) = rest.split_once("' value:'") else {
+            continue;
+        };
+        let Some((value, _)) = rest.rsplit_once("' type:'") else {
+            continue;
+        };
+        let Ok(id) = id.parse::<u32>() else {
+            continue;
+        };
+        match key {
+            "default.configured.audio.sink" if id == 0 => {
+                out.configured_sink = serde_json::from_str::<serde_json::Value>(value)
+                    .ok()
+                    .and_then(|v| v.get("name")?.as_str().map(str::to_string));
+            }
+            "target.object" | "target.node" if value != "-1" => out.pinned.push(id),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Move saved playback streams that still exist (same index *and* app) to the
 /// card's sink. Waits up to `wait` for the sink to appear after the profile was set.
 pub fn move_streams_to_card(streams: &[SavedStream], card_index: u32, wait: Duration) {
@@ -478,4 +619,31 @@ pub fn refresh_default(kind: DefaultKind, name: &str) {
     set(&other);
     std::thread::sleep(Duration::from_millis(150));
     set(name);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pw_metadata_gives_configured_sink_and_pinned_streams() {
+        let text = r#"Found "default" metadata 40
+update: id:0 key:'default.configured.audio.sink' value:'{ "name": "bluez_output.24_C4_06_94_4B_E1.1" }' type:'Spa:String:JSON'
+update: id:0 key:'default.audio.sink' value:'{"name":"alsa_output.usb"}' type:'Spa:String:JSON'
+update: id:152 key:'target.object' value:'7179' type:'Spa:Id'
+update: id:153 key:'target.object' value:'-1' type:'Spa:Id'
+"#;
+        assert_eq!(
+            parse_pw_metadata(text),
+            PwMetadata {
+                configured_sink: Some("bluez_output.24_C4_06_94_4B_E1.1".to_string()),
+                pinned: vec![152],
+            }
+        );
+    }
+
+    #[test]
+    fn pw_metadata_without_entries_is_empty() {
+        assert_eq!(parse_pw_metadata(""), PwMetadata::default());
+    }
 }
