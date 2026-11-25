@@ -68,7 +68,7 @@ struct Player {
 /// paused.
 fn playback(players: &[Player]) -> Playback {
     let any = |status| players.iter().any(|player| player.status == status);
-    if any(Playback::Playing) {
+    if playing(players).next().is_some() {
         Playback::Playing
     } else if any(Playback::Paused) {
         Playback::Paused
@@ -341,6 +341,13 @@ mod tests {
         list.iter()
             .map(|&(service, method)| (service.to_string(), method))
             .collect()
+    }
+
+    #[test]
+    fn a_lagging_mirror_is_not_heard_as_playing() {
+        use Playback::*;
+        let lagging = players(&[(VIDEO, Paused), (LATEST, Playing)]);
+        assert_eq!(playback(&lagging), Paused);
     }
 
     #[test]
