@@ -24,8 +24,9 @@ to the media keys. Other headsets and your keyboard are not touched. podbridge
 gives the squeeze back to the AirPods when it quits normally.
 
 While an app records from the AirPods microphone, as in a call, a squeeze mutes
-and unmutes the microphone instead. A notification says which. The mute ends
-with the recording.
+and unmutes the microphone instead. A notification says which. While an app
+still records, the mute stays, even with the buds out or the AirPods gone. It
+ends a little after the recording does.
 
 ## Build
 

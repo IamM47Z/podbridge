@@ -701,6 +701,25 @@ pub fn set_default_source(name: &str) -> bool {
     ok.get()
 }
 
+/// Whether the source `name` is muted. None if it is missing or the sound
+/// server does not answer.
+pub fn source_muted(name: &str) -> Option<bool> {
+    let (mut mainloop, context) = connect()?;
+    let muted = Rc::new(Cell::new(None));
+    let op = context.introspect().get_source_info_by_name(name, {
+        let muted = muted.clone();
+        move |result| {
+            if let ListResult::Item(item) = result {
+                muted.set(Some(item.mute));
+            }
+        }
+    });
+    wait_op(&mut mainloop, &op);
+    drop(op);
+    mainloop.quit(Retval(0));
+    muted.get()
+}
+
 /// Mute or unmute the source `name`, as the desktop's microphone mute does.
 pub fn set_source_mute(name: &str, muted: bool) -> bool {
     let Some((mut mainloop, context)) = connect() else {
