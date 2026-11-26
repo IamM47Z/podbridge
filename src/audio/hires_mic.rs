@@ -575,7 +575,8 @@ impl Monitor {
         }
 
         // Once disabled and nothing is recording from the source, unload it.
-        enabled || recording
+        let mute_pending = blocking(mic_mute::pending).await.unwrap_or(true);
+        monitor_stays(enabled, recording, mute_pending)
     }
 
     /// Apps close and reopen their mic stream often (push-to-talk, rejoining
@@ -1136,10 +1137,20 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
                 .is_none_or(|m| m.users > 0 || m.generation != generation)
         };
         let mut idle = mic_mute::Idle::default();
+        let mut missing = 0;
         while blocking(move || !superseded() && mic_mute::pending())
             .await
             .unwrap_or(false)
         {
+            // Twice, like the monitor: a restarted sound server lost the mic.
+            match blocking(|| output::source_consumer(output::SOURCE_NAME)).await {
+                Some(output::SourceUse::Missing) => missing += 1,
+                _ => missing = 0,
+            }
+            if missing >= 2 {
+                blocking(move || drop_lost_mic(generation)).await;
+                return;
+            }
             idle = blocking(move || {
                 mic_mute::end_when_idle(&mut idle);
                 idle
@@ -1178,6 +1189,28 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
         })
         .await;
     });
+}
+
+/// The sound server that held the virtual mic is gone, and the squeeze mute
+/// with it. The module index belongs to that server, so it is forgotten rather
+/// than unloaded (see recreate_mic). Blocking.
+fn drop_lost_mic(generation: u64) {
+    let mut guard = shared_mic();
+    if guard
+        .as_ref()
+        .is_some_and(|m| m.users == 0 && m.generation == generation)
+    {
+        if let Some(mic) = guard.take() {
+            std::mem::forget(mic.vmic);
+        }
+        mic_mute::forget();
+    }
+}
+
+/// Whether the monitor keeps running: while the feature is on, while an app
+/// records, and until a squeeze mute has been ended.
+fn monitor_stays(enabled: bool, recording: bool, mute_pending: bool) -> bool {
+    enabled || recording || mute_pending
 }
 
 /// Whether a leftover mic is removed: only when nothing records, since a mic
@@ -1434,8 +1467,19 @@ fn spawn_decode_thread(
 
 #[cfg(test)]
 mod tests {
-    use super::{CaptureAction, Parked, capture_action, carried_over, remove_leftover};
+    use super::{
+        CaptureAction, Parked, capture_action, carried_over, monitor_stays, remove_leftover,
+    };
     use crate::audio::output::Recorder;
+
+    #[test]
+    fn the_monitor_stays_while_it_has_something_to_do() {
+        assert!(monitor_stays(true, false, false));
+        assert!(monitor_stays(false, true, false));
+        // Switched off, between two streams of a muted recording.
+        assert!(monitor_stays(false, false, true));
+        assert!(!monitor_stays(false, false, false));
+    }
 
     #[test]
     fn leftover_mic_is_removed_only_when_nothing_records() {
