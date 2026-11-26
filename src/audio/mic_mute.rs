@@ -70,11 +70,13 @@ fn holds(marked: bool, muted: Option<bool>, recorders: bool) -> bool {
 /// An app records from a microphone we muted: leave both as they are. Blocking.
 pub fn holds_a_recording() -> bool {
     let _lock = lock();
-    holds(
-        marker().exists(),
-        output::source_muted(SOURCE_NAME),
-        !output::recorders_on(SOURCE_NAME).is_empty(),
-    )
+    // Without a mute of ours there is no need to ask the sound server.
+    pending()
+        && holds(
+            true,
+            output::source_muted(SOURCE_NAME),
+            !output::recorders_on(SOURCE_NAME).is_empty(),
+        )
 }
 
 /// How long nothing has recorded.
@@ -92,18 +94,47 @@ impl Idle {
     }
 }
 
-/// Unmute once nothing has recorded for a while. `recording` is the hi-res
-/// monitor's view. Blocking.
-pub fn end_when_idle(idle: &mut Idle, recording: bool) {
+#[derive(Debug, PartialEq)]
+enum Ending {
+    Keep,
+    Unmute,
+    /// Someone else lifted it: there is nothing of ours left to end.
+    Forget,
+}
+
+fn ending(muted: Option<bool>, idle_long_enough: bool) -> Ending {
+    if muted == Some(false) {
+        Ending::Forget
+    } else if idle_long_enough {
+        Ending::Unmute
+    } else {
+        Ending::Keep
+    }
+}
+
+/// A mute of ours is still to be ended. Blocking.
+pub fn pending() -> bool {
+    marker().exists()
+}
+
+/// Unmute once nothing has recorded for a while. Blocking.
+pub fn end_when_idle(idle: &mut Idle) {
     let _lock = lock();
-    if !marker().exists() {
+    if !pending() {
         *idle = Idle::default();
         return;
     }
-    let in_use = recording || !output::recorders_on(SOURCE_NAME).is_empty();
-    if idle.long_enough(in_use, Instant::now()) && output::set_source_mute(SOURCE_NAME, false) {
-        info!("[hires] recording over; unmuted '{SOURCE_NAME}'");
-        set_marked(false);
+    let in_use = !output::recorders_on(SOURCE_NAME).is_empty();
+    let long_enough = idle.long_enough(in_use, Instant::now());
+    match ending(output::source_muted(SOURCE_NAME), long_enough) {
+        Ending::Keep => {}
+        Ending::Forget => set_marked(false),
+        Ending::Unmute => {
+            if output::set_source_mute(SOURCE_NAME, false) {
+                info!("[hires] recording over; unmuted '{SOURCE_NAME}'");
+                set_marked(false);
+            }
+        }
     }
 }
 
@@ -134,6 +165,16 @@ mod tests {
         assert!(!holds(true, Some(false), true));
         assert!(!holds(false, Some(true), true));
         assert!(!holds(true, Some(true), false));
+    }
+
+    #[test]
+    fn a_mute_lifted_elsewhere_is_no_longer_ours() {
+        // Unmuted from the desktop: a later mute there is the user's own.
+        assert_eq!(ending(Some(false), false), Ending::Forget);
+        assert_eq!(ending(Some(false), true), Ending::Forget);
+        assert_eq!(ending(Some(true), false), Ending::Keep);
+        assert_eq!(ending(Some(true), true), Ending::Unmute);
+        assert_eq!(ending(None, true), Ending::Unmute);
     }
 
     #[test]

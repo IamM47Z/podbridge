@@ -496,7 +496,7 @@ impl Monitor {
         // The next recording must not start silent.
         let mut idle = std::mem::take(&mut self.mute_idle);
         self.mute_idle = blocking(move || {
-            mic_mute::end_when_idle(&mut idle, enabled && recording);
+            mic_mute::end_when_idle(&mut idle);
             idle
         })
         .await
@@ -834,7 +834,10 @@ impl Monitor {
         self.status.reset();
         blocking(output::restore_wireplumber_mic).await;
 
-        if self.aacp.hires_mic_enabled() {
+        if self.aacp.hires_mic_enabled()
+            // A muted recording keeps its mic even with the feature off.
+            || blocking(mic_mute::holds_a_recording).await.unwrap_or(true)
+        {
             // Disconnected (or podbridge exiting): keep the virtual mic for now.
             release_mic(&tokio::runtime::Handle::current());
         } else {
@@ -1125,6 +1128,26 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
     };
     runtime.spawn(async move {
         tokio::time::sleep(DISCONNECT_PARK_DELAY).await;
+        // A squeeze mute outlasts the connection: with no monitor left, end it
+        // here once the recording does, before parking and removing.
+        let superseded = move || {
+            shared_mic()
+                .as_ref()
+                .is_none_or(|m| m.users > 0 || m.generation != generation)
+        };
+        let mut idle = mic_mute::Idle::default();
+        while blocking(move || !superseded() && mic_mute::pending())
+            .await
+            .unwrap_or(false)
+        {
+            idle = blocking(move || {
+                mic_mute::end_when_idle(&mut idle);
+                idle
+            })
+            .await
+            .unwrap_or_default();
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
         let _ = tokio::task::spawn_blocking(move || {
             let mut guard = shared_mic();
             let Some(mic) = guard.as_mut() else { return };
