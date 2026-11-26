@@ -118,6 +118,8 @@ pub struct AACPManager {
     /// The user changed conversation awareness while a capture had it
     /// overridden; the capture then must not restore its saved value.
     convo_user_changed: Arc<AtomicBool>,
+    /// The send task has written all it was given and ended.
+    sent_all: Arc<Notify>,
 }
 
 impl AACPManager {
@@ -134,6 +136,18 @@ impl AACPManager {
             runtime: tokio::runtime::Handle::current(),
             connected: Arc::new(watch::channel(false).0),
             convo_user_changed: Arc::new(AtomicBool::new(false)),
+            sent_all: Arc::new(Notify::new()),
+        }
+    }
+
+    /// Wait until every queued packet is written. Nothing can be sent
+    /// afterwards: for use just before quitting.
+    pub async fn flush(&self) {
+        // Dropping the sender lets the send task drain its queue and end.
+        let sender = self.state.lock().await.sender.take();
+        if sender.is_some() {
+            drop(sender);
+            self.sent_all.notified().await;
         }
     }
 
@@ -426,7 +440,7 @@ impl AACPManager {
         self.connected.send_replace(true);
         let mut tasks = self.tasks.lock().await;
         tasks.spawn(recv_thread(manager_clone, seq_packet.clone()));
-        tasks.spawn(send_thread(rx, seq_packet));
+        tasks.spawn(send_thread(rx, seq_packet, self.sent_all.clone()));
         true
     }
 
@@ -949,8 +963,8 @@ async fn recv_thread(manager: AACPManager, sp: Arc<SeqPacket>) {
     manager.disarm_hires_mic().await;
 }
 
-async fn send_thread(mut rx: mpsc::Receiver<Vec<u8>>, sp: Arc<SeqPacket>) {
-    while let Some(data) = rx.recv().await {
+async fn send_thread(mut rx: mpsc::Receiver<Vec<u8>>, sp: Arc<SeqPacket>, done: Arc<Notify>) {
+    'queue: while let Some(data) = rx.recv().await {
         let mut attempts = 0;
         loop {
             match sp.send(&data).await {
@@ -964,12 +978,13 @@ async fn send_thread(mut rx: mpsc::Receiver<Vec<u8>>, sp: Arc<SeqPacket>) {
                 }
                 Err(e) => {
                     error!("Failed to send data: {}", e);
-                    return;
+                    break 'queue;
                 }
             }
         }
     }
     info!("Send thread finished.");
+    done.notify_one();
 }
 
 #[cfg(test)]
@@ -1282,6 +1297,41 @@ mod tests {
 
         assert!(manager.send_hijack_request("not a mac").await.is_err());
         assert!(rx.try_recv().is_err());
+    }
+
+    /// What is queued before quitting must be on the wire before we exit.
+    #[tokio::test]
+    async fn flush_returns_only_once_the_queue_is_written() {
+        use super::*;
+        let manager = AACPManager::new();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
+        manager.state.lock().await.sender = Some(tx);
+        // Stands in for send_thread: slow writes, then it reports it is done.
+        let written = Arc::new(std::sync::Mutex::new(0));
+        let (count, done) = (written.clone(), manager.sent_all.clone());
+        tokio::spawn(async move {
+            while rx.recv().await.is_some() {
+                sleep(Duration::from_millis(20)).await;
+                *count.lock().unwrap() += 1;
+            }
+            done.notify_one();
+        });
+        for value in [0x00, 0x01] {
+            manager
+                .send_control_command(ControlCommandIdentifiers::StemConfig, &[value])
+                .await
+                .unwrap();
+        }
+
+        tokio::time::timeout(Duration::from_secs(5), manager.flush())
+            .await
+            .expect("flush ends once the writer has");
+
+        assert_eq!(*written.lock().unwrap(), 2);
+        // Without a connection there is nothing to wait for.
+        tokio::time::timeout(Duration::from_secs(5), manager.flush())
+            .await
+            .expect("nothing queued");
     }
 
     #[test]

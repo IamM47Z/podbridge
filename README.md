@@ -21,7 +21,7 @@ Other distributions: download the binary or the AppImage from the
 podbridge takes the single squeeze from the AirPods over their own protocol. It
 pauses what plays, or resumes the player used last, whatever your desktop binds
 to the media keys. Other headsets and your keyboard are not touched. podbridge
-gives the squeeze back to the AirPods when it quits.
+gives the squeeze back to the AirPods when it quits normally.
 
 ## Build
 

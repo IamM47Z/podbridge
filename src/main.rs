@@ -727,13 +727,19 @@ fn spawn_shutdown_handler(
             let managers = device_managers.read().await;
             for dm in managers.values() {
                 if let Some(aacp) = dm.get_aacp() {
-                    // Nobody would answer a reported press once we are gone.
-                    devices::airpods::request_stem_presses(&aacp, 0).await;
                     aacp.disarm_hires_mic().await;
                 }
             }
             // The virtual mic stays loaded for the next run; send apps elsewhere.
             let _ = tokio::task::spawn_blocking(crate::audio::hires_mic::park_on_exit).await;
+            // Last, as nothing can be sent after the flush: nobody would answer
+            // a reported press once we are gone.
+            for dm in managers.values() {
+                if let Some(aacp) = dm.get_aacp() {
+                    devices::airpods::request_stem_presses(&aacp, 0).await;
+                    aacp.flush().await;
+                }
+            }
         };
         if tokio::time::timeout(std::time::Duration::from_secs(6), cleanup)
             .await
