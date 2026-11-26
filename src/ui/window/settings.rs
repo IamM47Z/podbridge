@@ -105,7 +105,7 @@ impl App {
     fn stem_controls(&self) -> Column<'_, Message> {
         let mut rows = vec![plain_toggle(
             "Stem press control",
-            "podbridge always plays and pauses on a single press. This also gives it double and triple presses, with the actions below. Turning this on or off takes effect on the next connect. A changed action applies at once. Off, the AirPods send their own next and previous track commands.",
+            "podbridge always plays and pauses on a single press. Turn this on to let it handle double and triple presses too, with the actions below. Turning it on or off takes effect on the next connect. A changed action applies at once. Off, the AirPods send their own next and previous track commands.",
             self.stem_control,
             Message::StemControlChanged,
         )];
