@@ -23,6 +23,10 @@ pauses what plays, or resumes the player used last, whatever your desktop binds
 to the media keys. Other headsets and your keyboard are not touched. podbridge
 gives the squeeze back to the AirPods when it quits normally.
 
+While an app records from the AirPods microphone, as in a call, a squeeze mutes
+and unmutes the microphone instead. A notification says which. The mute ends
+with the recording.
+
 ## Build
 
 Needs Rust, `pkg-config`, D-Bus, PulseAudio client and FFmpeg development

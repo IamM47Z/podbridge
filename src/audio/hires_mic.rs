@@ -110,11 +110,24 @@ pub struct MicStatus {
     /// is refreshed at every start without audio, so only this may clear the
     /// failed-restart count.
     got_audio: Arc<AtomicBool>,
+    /// A squeeze muted the microphone and it has not been unmuted since.
+    squeeze_muted: Arc<AtomicBool>,
 }
 
 impl MicStatus {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Flip the squeeze mute. Returns whether the microphone is now muted.
+    pub fn toggle_squeeze_mute(&self) -> bool {
+        !self.squeeze_muted.fetch_xor(true, Ordering::Relaxed)
+    }
+
+    /// True, once, when a squeeze mute is due to end: no app records any more
+    /// or the hi-res mic was switched off.
+    fn take_ended_mute(&self, enabled: bool, recording: bool) -> bool {
+        (!enabled || !recording) && self.squeeze_muted.swap(false, Ordering::Relaxed)
     }
 
     pub fn set_level(&self, level: f32) {
@@ -477,6 +490,10 @@ impl Monitor {
         let app = self.recording_app().await;
         let enabled = self.aacp.hires_mic_enabled();
         let recording = self.recording(app.is_some());
+        // The next recording must not start silent.
+        if self.status.take_ended_mute(enabled, recording) {
+            unmute_after_recording().await;
+        }
 
         if self.fallback.is_some() {
             self.poll_fallback(enabled && app.is_some() && wearing.worn)
@@ -785,6 +802,9 @@ impl Monitor {
 
     /// The monitor stopped: end any capture or fallback and release the mic.
     async fn finish(mut self) {
+        if self.status.take_ended_mute(false, false) {
+            unmute_after_recording().await;
+        }
         if let Some(c) = self.capture.take() {
             stop_capture(c, &self.aacp).await;
             self.restore_convo().await;
@@ -1293,6 +1313,11 @@ fn schedule_a2dp_reset(addr: &str) {
 /// Pending A2DP reset: (when to run it, when it was last requested).
 static RESET_AT: Mutex<Option<(Instant, Instant)>> = Mutex::new(None);
 
+async fn unmute_after_recording() {
+    info!("[hires] recording over; unmuting '{}'", output::SOURCE_NAME);
+    blocking(|| output::set_source_mute(output::SOURCE_NAME, false)).await;
+}
+
 async fn stop_capture(mut capture: Capture, aacp: &AACPManager) {
     if let Err(e) = aacp.send_stop_audio().await {
         warn!("failed to send 0x58 STOP: {}", e);
@@ -1375,8 +1400,25 @@ fn spawn_decode_thread(
 
 #[cfg(test)]
 mod tests {
-    use super::{CaptureAction, Parked, capture_action, carried_over, remove_leftover};
+    use super::{CaptureAction, MicStatus, Parked, capture_action, carried_over, remove_leftover};
     use crate::audio::output::Recorder;
+
+    #[test]
+    fn a_squeeze_mute_toggles_and_lasts_as_long_as_the_recording() {
+        let status = MicStatus::new();
+        assert!(status.toggle_squeeze_mute());
+        assert!(!status.toggle_squeeze_mute());
+        assert!(status.toggle_squeeze_mute());
+        // A restarted capture, or a bud out while an app still records.
+        status.reset();
+        assert!(!status.take_ended_mute(true, true));
+        // The recording is over: unmute once.
+        assert!(status.take_ended_mute(true, false));
+        assert!(!status.take_ended_mute(true, false));
+        // Switching the hi-res mic off ends it too.
+        status.toggle_squeeze_mute();
+        assert!(status.take_ended_mute(false, true));
+    }
 
     #[test]
     fn leftover_mic_is_removed_only_when_nothing_records() {
