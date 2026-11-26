@@ -470,22 +470,22 @@ impl ConnectionWatcher {
                 return;
             }
             info!("AirPods connected: {}, initializing", name);
-            loop {
-                close_stale_link(&backend.device_managers, &addr_str).await;
-                let airpods_device = AirPodsDevice::new(
-                    addr,
-                    backend.tray_handle.clone(),
-                    backend.ui_tx.clone(),
-                    backend.local_mac.clone(),
-                )
-                .await;
-                let (_, end) = backend
-                    .finish_airpods_setup(&addr_str, airpods_device)
+            set_up_until_settled(|| {
+                let (backend, addr_str) = (&backend, &addr_str);
+                async move {
+                    close_stale_link(&backend.device_managers, addr_str).await;
+                    let airpods_device = AirPodsDevice::new(
+                        addr,
+                        backend.tray_handle.clone(),
+                        backend.ui_tx.clone(),
+                        backend.local_mac.clone(),
+                    )
                     .await;
-                if end != SetupEnd::Again {
-                    break;
+                    let (_, end) = backend.finish_airpods_setup(addr_str, airpods_device).await;
+                    end
                 }
-            }
+            })
+            .await;
         });
     }
 }
@@ -604,6 +604,11 @@ fn end_setup(connecting: &Connecting, mac: &str, channel_up: impl FnOnce() -> bo
     }
     claims.remove(mac);
     if up { SetupEnd::Show } else { SetupEnd::Hidden }
+}
+
+/// Run a claimed setup, and again for as long as its end asks for it.
+async fn set_up_until_settled<F: Future<Output = SetupEnd>>(mut set_up: impl FnMut() -> F) {
+    while set_up().await == SetupEnd::Again {}
 }
 
 /// What to do once a setup is over.
@@ -856,5 +861,27 @@ mod tests {
         assert!(begin_setup(&connecting, "BB"));
         assert!(!begin_setup(&connecting, "BB"));
         assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Hidden);
+    }
+
+    #[tokio::test]
+    async fn a_setup_runs_until_nothing_connects_during_it() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        let runs = std::cell::Cell::new(0);
+        set_up_until_settled(|| {
+            let (connecting, runs) = (&connecting, &runs);
+            async move {
+                runs.set(runs.get() + 1);
+                // Another connect arrives during the first two runs only.
+                if runs.get() < 3 {
+                    assert!(!begin_setup(connecting, "AA"));
+                }
+                end_setup(connecting, "AA", || false)
+            }
+        })
+        .await;
+        assert_eq!(runs.get(), 3);
+        // The last run released the claim.
+        assert!(begin_setup(&connecting, "AA"));
     }
 }
