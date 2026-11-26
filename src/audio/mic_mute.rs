@@ -1,6 +1,6 @@
-//! The squeeze mute of the AirPods microphone. While an app still records, the
-//! mute must not end and the recording must not move to another microphone: the
-//! user believes they are muted. A marker file keeps it across restarts.
+//! The squeeze mute of the AirPods microphone. Until it ends, no recording may
+//! move to another microphone: the user believes they are muted, also while an
+//! app is between two streams. A marker file keeps it across restarts.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -62,21 +62,16 @@ pub fn toggle() -> Option<bool> {
     done.then_some(muted)
 }
 
-fn holds(marked: bool, muted: Option<bool>, recorders: bool) -> bool {
+fn holds(marked: bool, muted: Option<bool>) -> bool {
     // Unknown counts as muted.
-    marked && muted != Some(false) && recorders
+    marked && muted != Some(false)
 }
 
-/// An app records from a microphone we muted: leave both as they are. Blocking.
-pub fn holds_a_recording() -> bool {
+/// Our mute is not over: leave the microphone as it is and where it is. Blocking.
+pub fn holds_the_mic() -> bool {
     let _lock = lock();
     // Without a mute of ours there is no need to ask the sound server.
-    pending()
-        && holds(
-            true,
-            output::source_muted(SOURCE_NAME),
-            !output::recorders_on(SOURCE_NAME).is_empty(),
-        )
+    pending() && holds(true, output::source_muted(SOURCE_NAME))
 }
 
 /// How long nothing has recorded.
@@ -157,14 +152,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_muted_recording_is_held() {
-        assert!(holds(true, Some(true), true));
+    fn a_pending_mute_holds_the_mic() {
+        // With or without a recorder: an app between two streams comes back.
+        assert!(holds(true, Some(true)));
         // Cannot tell whether it is muted: assume it is.
-        assert!(holds(true, None, true));
-        // Unmuted from the desktop, not by us, or nobody records.
-        assert!(!holds(true, Some(false), true));
-        assert!(!holds(false, Some(true), true));
-        assert!(!holds(true, Some(true), false));
+        assert!(holds(true, None));
+        // Unmuted from the desktop, or not muted by us.
+        assert!(!holds(true, Some(false)));
+        assert!(!holds(false, Some(true)));
     }
 
     #[test]

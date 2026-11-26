@@ -836,8 +836,8 @@ impl Monitor {
         blocking(output::restore_wireplumber_mic).await;
 
         if self.aacp.hires_mic_enabled()
-            // A muted recording keeps its mic even with the feature off.
-            || blocking(mic_mute::holds_a_recording).await.unwrap_or(true)
+            // A muted mic stays even with the feature off.
+            || blocking(mic_mute::holds_the_mic).await.unwrap_or(true)
         {
             // Disconnected (or podbridge exiting): keep the virtual mic for now.
             release_mic(&tokio::runtime::Handle::current());
@@ -1091,9 +1091,9 @@ fn mic_is_parked() -> bool {
 }
 
 /// Park the mic now (no bud worn, or podbridge exiting). False if it must stay
-/// shown: moving a muted recording would put it on a live microphone. Blocking.
+/// shown: moving a muted call would put it on a live microphone. Blocking.
 fn park_mic() -> bool {
-    if mic_mute::holds_a_recording() {
+    if mic_mute::holds_the_mic() {
         return false;
     }
     let mut guard = shared_mic();
@@ -1166,8 +1166,8 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
                 return;
             }
             // Often parked already: no bud was worn before the disconnect.
-            // A muted recording stays where it is (see park_mic).
-            if mic.parked.is_none() && !mic_mute::holds_a_recording() {
+            // A muted mic stays as it is (see park_mic).
+            if mic.parked.is_none() && !mic_mute::holds_the_mic() {
                 info!("[hires] AirPods still gone; switching apps to another microphone");
                 let parked = park();
                 save_parked(Some(&parked));
@@ -1287,7 +1287,8 @@ fn recreate_mic(description: &str) -> bool {
 }
 
 /// podbridge is exiting: keep the virtual mic loaded (the next run adopts it)
-/// but send apps to another mic, since nothing will feed this one.
+/// and send apps to another mic, since nothing will feed this one, unless our
+/// mute still holds it (see park_mic).
 pub fn park_on_exit() {
     park_mic();
     output::restore_wireplumber_mic();
