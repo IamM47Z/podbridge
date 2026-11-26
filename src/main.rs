@@ -23,7 +23,8 @@ use dbus::message::MatchRule;
 use devices::airpods::AirPodsDevice;
 use ksni::TrayMethods;
 use log::{debug, info, warn};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -162,7 +163,7 @@ async fn async_main(
         tray_handle,
         device_managers,
         local_mac,
-        connecting: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        connecting: Connecting::default(),
     };
 
     // Subscribe to connection changes *before* scanning for already connected
@@ -280,11 +281,14 @@ impl Backend {
         }
     }
 
-    /// Store the AirPods' managers, end the setup claim and show them unless
-    /// their control channel is down. Returns their AACP manager.
-    async fn finish_airpods_setup(&self, mac: &str, airpods_device: AirPodsDevice) -> AACPManager {
+    /// Store the AirPods' managers, end the setup (see end_setup) and show them
+    /// if their control channel is up. Returns their AACP manager too.
+    async fn finish_airpods_setup(
+        &self,
+        mac: &str,
+        airpods_device: AirPodsDevice,
+    ) -> (AACPManager, SetupEnd) {
         let aacp = airpods_device.aacp_manager.clone();
-        let channel_up = aacp.is_connected();
         let mut managers = self.device_managers.write().await;
         // let dev_managers = DeviceManagers::with_both(airpods_device.aacp_manager.clone(), airpods_device.att_manager.clone());
         let dev_managers = DeviceManagers::with_aacp(airpods_device.aacp_manager.clone());
@@ -293,15 +297,22 @@ impl Backend {
             .or_insert(dev_managers)
             .set_aacp(airpods_device.aacp_manager);
         drop(managers);
-        end_setup(&self.connecting, mac);
-        if !channel_up {
+        let end = end_setup(&self.connecting, mac, || aacp.is_connected());
+        match end {
+            SetupEnd::Show => {
+                self.send_ui(BluetoothUIMessage::DeviceConnected(mac.to_string()));
+            }
             // Don't show a device whose controls can't work; the next
             // connect signal from BlueZ sets it up again.
-            warn!("{} has no AACP channel; not showing it as connected", mac);
-        } else {
-            self.send_ui(BluetoothUIMessage::DeviceConnected(mac.to_string()));
+            SetupEnd::Hidden => {
+                warn!("{} has no AACP channel; not showing it as connected", mac);
+            }
+            SetupEnd::Again => warn!(
+                "{} has no AACP channel but connected again during setup; setting up anew",
+                mac
+            ),
         }
-        aacp
+        (aacp, end)
     }
 
     /// Connect a Nothing device and show it. Runs in its own task.
@@ -445,7 +456,7 @@ impl ConnectionWatcher {
         tokio::spawn(async move {
             if !begin_setup(&backend.connecting, &addr_str) {
                 info!(
-                    "Already setting up {}; ignoring duplicate connect or UUIDs change",
+                    "Already setting up {}; will set it up again if this setup ends without a channel",
                     addr_str
                 );
                 return;
@@ -454,22 +465,27 @@ impl ConnectionWatcher {
             if change == DeviceChange::UuidsChanged
                 && aacp_link_up(&backend.device_managers, &addr_str).await
             {
-                end_setup(&backend.connecting, &addr_str);
+                end_setup(&backend.connecting, &addr_str, || true);
                 debug!("{} UUIDs changed; already set up", addr_str);
                 return;
             }
             info!("AirPods connected: {}, initializing", name);
-            close_stale_link(&backend.device_managers, &addr_str).await;
-            let airpods_device = AirPodsDevice::new(
-                addr,
-                backend.tray_handle.clone(),
-                backend.ui_tx.clone(),
-                backend.local_mac.clone(),
-            )
-            .await;
-            backend
-                .finish_airpods_setup(&addr_str, airpods_device)
+            loop {
+                close_stale_link(&backend.device_managers, &addr_str).await;
+                let airpods_device = AirPodsDevice::new(
+                    addr,
+                    backend.tray_handle.clone(),
+                    backend.ui_tx.clone(),
+                    backend.local_mac.clone(),
+                )
                 .await;
+                let (_, end) = backend
+                    .finish_airpods_setup(&addr_str, airpods_device)
+                    .await;
+                if end != SetupEnd::Again {
+                    break;
+                }
+            }
         });
     }
 }
@@ -507,7 +523,9 @@ async fn setup_connected_airpods(adapter: &bluer::Adapter, backend: &Backend) {
     )
     .await;
 
-    let hires_aacp = backend.finish_airpods_setup(&mac_str, airpods_device).await;
+    // Never SetupEnd::Again: connect signals are read only after this scan, and
+    // one that queued meanwhile then starts its own setup.
+    let (hires_aacp, _) = backend.finish_airpods_setup(&mac_str, airpods_device).await;
     // PODBRIDGE_HIRES_MIC=1: enable the hi-res mic feature headlessly.
     if env::var("PODBRIDGE_HIRES_MIC").is_ok() {
         tokio::spawn(async move {
@@ -552,23 +570,51 @@ async fn setup_connected_managed_devices(
     }
 }
 
-/// MACs whose AirPodsDevice is being set up right now.
-type Connecting = Arc<std::sync::Mutex<HashSet<String>>>;
+/// MACs whose AirPodsDevice is being set up right now, each with whether a
+/// further setup was asked for since this one (re)started.
+type Connecting = Arc<std::sync::Mutex<HashMap<String, bool>>>;
 
 /// Claim the setup of a device; false if it's already being set up (duplicate
-/// connect signal, or the startup scan racing the signal).
+/// connect signal, the startup scan racing the signal, or a reconnect after the
+/// link dropped mid-setup). A refused claim is remembered for end_setup.
 fn begin_setup(connecting: &Connecting, mac: &str) -> bool {
-    connecting
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(mac.to_string())
+    let mut claims = connecting.lock().unwrap_or_else(|e| e.into_inner());
+    match claims.entry(mac.to_string()) {
+        Entry::Occupied(mut claim) => {
+            claim.insert(true);
+            false
+        }
+        Entry::Vacant(free) => {
+            free.insert(false);
+            true
+        }
+    }
 }
 
-fn end_setup(connecting: &Connecting, mac: &str) {
-    connecting
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(mac);
+/// End a setup and release its claim, except on SetupEnd::Again: BlueZ will not
+/// signal that connect a second time, so the caller keeps the claim and sets the
+/// device up again.
+fn end_setup(connecting: &Connecting, mac: &str, channel_up: impl FnOnce() -> bool) -> SetupEnd {
+    let mut claims = connecting.lock().unwrap_or_else(|e| e.into_inner());
+    // Read under the lock: a connect after this finds the claim released.
+    let up = channel_up();
+    if !up && let Some(again @ true) = claims.get_mut(mac) {
+        *again = false;
+        return SetupEnd::Again;
+    }
+    claims.remove(mac);
+    if up { SetupEnd::Show } else { SetupEnd::Hidden }
+}
+
+/// What to do once a setup is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetupEnd {
+    /// The control channel is up: show the device.
+    Show,
+    /// No control channel, and nothing connected meanwhile.
+    Hidden,
+    /// No control channel, but BlueZ reported them connected meanwhile.
+    Again,
 }
 
 /// True if these AirPods have a live AACP link.
@@ -771,5 +817,44 @@ mod tests {
     fn uuids_resolved_after_pairing_count_as_a_change() {
         assert_eq!(device_change(None, true), Some(DeviceChange::UuidsChanged));
         assert_eq!(device_change(None, false), None);
+    }
+
+    #[test]
+    fn a_connect_during_a_setup_that_loses_the_channel_runs_it_again() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        assert!(!begin_setup(&connecting, "AA"));
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Again);
+        // The claim is kept for that run, and one connect buys only one run.
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Hidden);
+        assert!(begin_setup(&connecting, "AA"));
+    }
+
+    #[test]
+    fn a_further_connect_during_the_second_run_asks_for_a_third() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        assert!(!begin_setup(&connecting, "AA"));
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Again);
+        assert!(!begin_setup(&connecting, "AA"));
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Again);
+    }
+
+    #[test]
+    fn a_duplicate_connect_changes_nothing_when_the_channel_is_up() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        assert!(!begin_setup(&connecting, "AA"));
+        assert_eq!(end_setup(&connecting, "AA", || true), SetupEnd::Show);
+        assert!(begin_setup(&connecting, "AA"));
+    }
+
+    #[test]
+    fn a_connect_for_another_device_does_not_run_this_one_again() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        assert!(begin_setup(&connecting, "BB"));
+        assert!(!begin_setup(&connecting, "BB"));
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Hidden);
     }
 }
