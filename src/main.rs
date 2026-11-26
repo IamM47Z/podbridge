@@ -412,6 +412,7 @@ impl ConnectionWatcher {
             return;
         };
         if change == DeviceChange::Disconnected {
+            cancel_rerun(&self.backend.connecting, &addr_str);
             if let Err(e) = self
                 .backend
                 .ui_tx
@@ -452,15 +453,17 @@ impl ConnectionWatcher {
             .get::<String>("org.bluez.Device1", "Name")
             .unwrap_or_else(|_| "Unknown".to_string());
         ensure_device_registered(&addr_str, &name, devices::enums::DeviceType::AirPods);
+        // Claimed here, in signal order: a task could claim only after a later
+        // disconnect had already cancelled.
+        if !begin_setup(&self.backend.connecting, &addr_str) {
+            info!(
+                "Already setting up {}; will set it up again if this setup ends without a channel",
+                addr_str
+            );
+            return;
+        }
         let backend = self.backend.clone();
         tokio::spawn(async move {
-            if !begin_setup(&backend.connecting, &addr_str) {
-                info!(
-                    "Already setting up {}; will set it up again if this setup ends without a channel",
-                    addr_str
-                );
-                return;
-            }
             // A UUIDs change on AirPods that are already set up changes nothing.
             if change == DeviceChange::UuidsChanged
                 && aacp_link_up(&backend.device_managers, &addr_str).await
@@ -576,7 +579,8 @@ type Connecting = Arc<std::sync::Mutex<HashMap<String, bool>>>;
 
 /// Claim the setup of a device; false if it's already being set up (duplicate
 /// connect signal, the startup scan racing the signal, or a reconnect after the
-/// link dropped mid-setup). A refused claim is remembered for end_setup.
+/// link dropped mid-setup). A refused claim is remembered for end_setup until
+/// cancel_rerun.
 fn begin_setup(connecting: &Connecting, mac: &str) -> bool {
     let mut claims = connecting.lock().unwrap_or_else(|e| e.into_inner());
     match claims.entry(mac.to_string()) {
@@ -588,6 +592,15 @@ fn begin_setup(connecting: &Connecting, mac: &str) -> bool {
             free.insert(false);
             true
         }
+    }
+}
+
+/// The device disconnected: forget a connect remembered for its running setup,
+/// as nothing is left to set up until BlueZ signals the next one.
+fn cancel_rerun(connecting: &Connecting, mac: &str) {
+    let mut claims = connecting.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(again) = claims.get_mut(mac) {
+        *again = false;
     }
 }
 
@@ -828,6 +841,27 @@ mod tests {
         // The claim is kept for that run, and one connect buys only one run.
         assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Hidden);
         assert!(begin_setup(&connecting, "AA"));
+    }
+
+    #[test]
+    fn a_disconnect_forgets_the_connect_remembered_before_it() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        assert!(!begin_setup(&connecting, "AA"));
+        cancel_rerun(&connecting, "AA");
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Hidden);
+    }
+
+    #[test]
+    fn a_connect_after_a_disconnect_still_runs_the_setup_again() {
+        let connecting = Connecting::default();
+        assert!(begin_setup(&connecting, "AA"));
+        cancel_rerun(&connecting, "AA");
+        assert!(!begin_setup(&connecting, "AA"));
+        assert_eq!(end_setup(&connecting, "AA", || false), SetupEnd::Again);
+        // A device with no setup running gets no claim from its disconnect.
+        cancel_rerun(&connecting, "BB");
+        assert!(begin_setup(&connecting, "BB"));
     }
 
     #[test]
