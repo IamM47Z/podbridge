@@ -14,6 +14,7 @@ use tokio::task::JoinHandle as TokioHandle;
 
 use crate::audio::card::NOT_WORN_GRACE;
 use crate::audio::eld::{ELD_CHANNELS, ELD_FRAME_SAMPLES, ELD_SAMPLE_RATE, EldDecoder};
+use crate::audio::mic_mute;
 use crate::audio::output::{self, Output, VirtualMic};
 use crate::bluetooth::aacp::AACPManager;
 use crate::bluetooth::aacp_audio;
@@ -110,8 +111,9 @@ pub struct MicStatus {
     /// is refreshed at every start without audio, so only this may clear the
     /// failed-restart count.
     got_audio: Arc<AtomicBool>,
-    /// A squeeze muted the microphone and it has not been unmuted since.
-    squeeze_muted: Arc<AtomicBool>,
+    /// An app recorded from the virtual mic at the last poll. Unlike `active`,
+    /// it drops as soon as the app stops and holds through a capture restart.
+    app_recording: Arc<AtomicBool>,
 }
 
 impl MicStatus {
@@ -119,15 +121,12 @@ impl MicStatus {
         Self::default()
     }
 
-    /// Flip the squeeze mute. Returns whether the microphone is now muted.
-    pub fn toggle_squeeze_mute(&self) -> bool {
-        !self.squeeze_muted.fetch_xor(true, Ordering::Relaxed)
+    pub fn recording(&self) -> bool {
+        self.app_recording.load(Ordering::Relaxed)
     }
 
-    /// True, once, when a squeeze mute is due to end: no app records any more
-    /// or the hi-res mic was switched off.
-    fn take_ended_mute(&self, enabled: bool, recording: bool) -> bool {
-        (!enabled || !recording) && self.squeeze_muted.swap(false, Ordering::Relaxed)
+    fn set_recording(&self, recording: bool) {
+        self.app_recording.store(recording, Ordering::Relaxed);
     }
 
     pub fn set_level(&self, level: f32) {
@@ -443,6 +442,8 @@ struct Monitor {
     /// is in the post-STOP state, so reset it once a bud is back (unless a
     /// START does).
     reset_when_worn: bool,
+    /// How long nothing has recorded, to end a squeeze mute.
+    mute_idle: mic_mute::Idle,
 }
 
 impl Monitor {
@@ -468,6 +469,7 @@ impl Monitor {
             out_since: None,
             seen_worn: false,
             reset_when_worn: false,
+            mute_idle: mic_mute::Idle::default(),
         }
     }
 
@@ -490,10 +492,15 @@ impl Monitor {
         let app = self.recording_app().await;
         let enabled = self.aacp.hires_mic_enabled();
         let recording = self.recording(app.is_some());
+        self.status.set_recording(app.is_some());
         // The next recording must not start silent.
-        if self.status.take_ended_mute(enabled, recording) {
-            unmute_after_recording().await;
-        }
+        let mut idle = std::mem::take(&mut self.mute_idle);
+        self.mute_idle = blocking(move || {
+            mic_mute::end_when_idle(&mut idle, enabled && recording);
+            idle
+        })
+        .await
+        .unwrap_or_default();
 
         if self.fallback.is_some() {
             self.poll_fallback(enabled && app.is_some() && wearing.worn)
@@ -594,12 +601,12 @@ impl Monitor {
         if self.capture.is_none()
             && self.shown
             && crate::utils::AppSettings::load().audio_off_when_not_wearing
+            && blocking(park_mic).await.unwrap_or(false)
         {
             info!(
-                "[hires] no bud in ear; parking '{}' so apps use another mic",
+                "[hires] no bud in ear; parked '{}' so apps use another mic",
                 output::SOURCE_NAME
             );
-            blocking(park_mic).await;
             self.shown = false;
         }
     }
@@ -671,6 +678,7 @@ impl Monitor {
         }
         let name = self.mic_name.clone();
         if blocking(move || recreate_mic(&name)).await.unwrap_or(false) {
+            blocking(mic_mute::restore).await;
             if !self.shown {
                 // No-op if the parked state was carried over.
                 blocking(park_mic).await;
@@ -802,9 +810,8 @@ impl Monitor {
 
     /// The monitor stopped: end any capture or fallback and release the mic.
     async fn finish(mut self) {
-        if self.status.take_ended_mute(false, false) {
-            unmute_after_recording().await;
-        }
+        // A squeeze mute stays: an app may go on recording from the mic.
+        self.status.set_recording(false);
         if let Some(c) = self.capture.take() {
             stop_capture(c, &self.aacp).await;
             self.restore_convo().await;
@@ -1079,8 +1086,12 @@ fn mic_is_parked() -> bool {
     shared_mic().as_ref().is_some_and(|m| m.parked.is_some())
 }
 
-/// Park the mic now (no bud worn, or podbridge exiting). Blocking.
-fn park_mic() {
+/// Park the mic now (no bud worn, or podbridge exiting). False if it must stay
+/// shown: moving a muted recording would put it on a live microphone. Blocking.
+fn park_mic() -> bool {
+    if mic_mute::holds_a_recording() {
+        return false;
+    }
     let mut guard = shared_mic();
     if let Some(mic) = guard.as_mut()
         && mic.parked.is_none()
@@ -1089,6 +1100,7 @@ fn park_mic() {
         save_parked(Some(&parked));
         mic.parked = Some(parked);
     }
+    true
 }
 
 /// Unpark the mic (a bud is back in). Blocking.
@@ -1120,7 +1132,8 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
                 return;
             }
             // Often parked already: no bud was worn before the disconnect.
-            if mic.parked.is_none() {
+            // A muted recording stays where it is (see park_mic).
+            if mic.parked.is_none() && !mic_mute::holds_a_recording() {
                 info!("[hires] AirPods still gone; switching apps to another microphone");
                 let parked = park();
                 save_parked(Some(&parked));
@@ -1137,6 +1150,7 @@ fn release_mic(runtime: &tokio::runtime::Handle) {
                 // The parked state stays on disk: the next connection creates
                 // the mic again and undoes the default-mic switch.
                 drop(guard.take());
+                mic_mute::forget();
             }
         })
         .await;
@@ -1169,6 +1183,7 @@ pub fn remove_leftover_mic() {
         output::SOURCE_NAME
     );
     output::unload_leftover();
+    mic_mute::forget();
 }
 
 /// The hi-res mic was turned off: unload the virtual mic. Blocking.
@@ -1180,6 +1195,7 @@ fn remove_mic() {
             output::SOURCE_NAME
         );
         drop(mic.vmic);
+        mic_mute::forget();
     }
     save_parked(None);
 }
@@ -1313,11 +1329,6 @@ fn schedule_a2dp_reset(addr: &str) {
 /// Pending A2DP reset: (when to run it, when it was last requested).
 static RESET_AT: Mutex<Option<(Instant, Instant)>> = Mutex::new(None);
 
-async fn unmute_after_recording() {
-    info!("[hires] recording over; unmuting '{}'", output::SOURCE_NAME);
-    blocking(|| output::set_source_mute(output::SOURCE_NAME, false)).await;
-}
-
 async fn stop_capture(mut capture: Capture, aacp: &AACPManager) {
     if let Err(e) = aacp.send_stop_audio().await {
         warn!("failed to send 0x58 STOP: {}", e);
@@ -1400,25 +1411,8 @@ fn spawn_decode_thread(
 
 #[cfg(test)]
 mod tests {
-    use super::{CaptureAction, MicStatus, Parked, capture_action, carried_over, remove_leftover};
+    use super::{CaptureAction, Parked, capture_action, carried_over, remove_leftover};
     use crate::audio::output::Recorder;
-
-    #[test]
-    fn a_squeeze_mute_toggles_and_lasts_as_long_as_the_recording() {
-        let status = MicStatus::new();
-        assert!(status.toggle_squeeze_mute());
-        assert!(!status.toggle_squeeze_mute());
-        assert!(status.toggle_squeeze_mute());
-        // A restarted capture, or a bud out while an app still records.
-        status.reset();
-        assert!(!status.take_ended_mute(true, true));
-        // The recording is over: unmute once.
-        assert!(status.take_ended_mute(true, false));
-        assert!(!status.take_ended_mute(true, false));
-        // Switching the hi-res mic off ends it too.
-        status.toggle_squeeze_mute();
-        assert!(status.take_ended_mute(false, true));
-    }
 
     #[test]
     fn leftover_mic_is_removed_only_when_nothing_records() {

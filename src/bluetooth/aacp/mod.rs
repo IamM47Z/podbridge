@@ -298,9 +298,9 @@ impl AACPManager {
         self.mic_status.active()
     }
 
-    /// Flip the squeeze mute of the microphone; true when it is now muted.
-    pub fn toggle_mic_mute(&self) -> bool {
-        self.mic_status.toggle_squeeze_mute()
+    /// Whether an app records from the virtual mic right now.
+    pub fn mic_recording(&self) -> bool {
+        self.mic_status.recording()
     }
 
     pub fn mic_app(&self) -> Option<String> {

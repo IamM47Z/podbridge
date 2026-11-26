@@ -550,28 +550,21 @@ impl EventLoop {
     /// Mute or unmute the AirPods microphone and say so: the recording app
     /// may not show it.
     async fn toggle_mic_mute(&self) {
-        let muted = self.aacp.toggle_mic_mute();
-        let state = if muted { "muted" } else { "on" };
-        info!("Single press during a recording: microphone {state}");
-        let done = tokio::task::spawn_blocking(move || {
-            use crate::audio::output;
-            let done = output::set_source_mute(output::SOURCE_NAME, muted);
-            if done {
-                let summary = format!("AirPods microphone {state}");
-                crate::devices::low_battery::notify(&summary, "");
-            }
-            done
+        let _ = tokio::task::spawn_blocking(|| {
+            let Some(muted) = crate::audio::mic_mute::toggle() else {
+                log::warn!("Could not change the microphone mute");
+                return;
+            };
+            let state = if muted { "muted" } else { "on" };
+            info!("Single press during a recording: microphone {state}");
+            let summary = format!("AirPods microphone {state}");
+            crate::devices::low_battery::notify(&summary, "");
         })
-        .await
-        .unwrap_or(false);
-        if !done {
-            log::warn!("Could not change the microphone mute");
-            self.aacp.toggle_mic_mute();
-        }
+        .await;
     }
 
     async fn handle_stem_press(&self, press_type: &crate::bluetooth::aacp::StemPressType) {
-        if mutes_mic(press_type, self.aacp.mic_active()) {
+        if mutes_mic(press_type, self.aacp.mic_recording()) {
             self.toggle_mic_mute().await;
             return;
         }
