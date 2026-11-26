@@ -14,6 +14,12 @@ use crate::audio::output::{self, SOURCE_NAME};
 /// restart: only silence this long ends the mute.
 const IDLE_BEFORE_UNMUTE: Duration = Duration::from_secs(10);
 
+/// How long quitting waits for a mute to end: the idle time, and a little for
+/// the sound server.
+pub const LONGEST_EXIT_WAIT: Duration = IDLE_BEFORE_UNMUTE.saturating_add(Duration::from_secs(2));
+
+const EXIT_POLL: Duration = Duration::from_millis(400);
+
 /// One change of the mute at a time: a press can meet the end of a recording.
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -133,6 +139,33 @@ pub fn end_when_idle(idle: &mut Idle) {
     }
 }
 
+/// Whether quitting should wait longer for a mute to end.
+fn wait_longer(pending: bool, recording: bool, waited: Duration) -> bool {
+    pending && !recording && waited < LONGEST_EXIT_WAIT
+}
+
+/// The user quit: end a pending mute as the monitor would have, so that it does
+/// not outlive podbridge. Gives up as soon as an app records, as the mute is not
+/// over then.
+pub async fn end_before_exit() {
+    let start = Instant::now();
+    let mut idle = Idle::default();
+    loop {
+        let waited = start.elapsed();
+        let poll = tokio::task::spawn_blocking(move || {
+            end_when_idle(&mut idle);
+            let pending = pending();
+            let recording = pending && !output::recorders_on(SOURCE_NAME).is_empty();
+            (wait_longer(pending, recording, waited), idle)
+        });
+        match poll.await {
+            Ok((true, next)) => idle = next,
+            _ => return,
+        }
+        tokio::time::sleep(EXIT_POLL).await;
+    }
+}
+
 /// A virtual mic created anew starts unmuted: mute it again if we had. Blocking.
 pub fn restore() {
     let _lock = lock();
@@ -150,6 +183,18 @@ pub fn forget() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quitting_waits_for_a_mute_until_it_ends_or_an_app_records() {
+        // The idle time itself fits in the wait, or no mute could end in it.
+        assert!(wait_longer(true, false, IDLE_BEFORE_UNMUTE));
+        // It gives up eventually: the sound server may not answer.
+        assert!(!wait_longer(true, false, Duration::from_secs(3600)));
+        // An app records: the mute is not over, and stays.
+        assert!(!wait_longer(true, true, Duration::ZERO));
+        // No mute of ours to end.
+        assert!(!wait_longer(false, false, Duration::ZERO));
+    }
 
     #[test]
     fn a_pending_mute_holds_the_mic() {
