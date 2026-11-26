@@ -136,8 +136,8 @@ impl MediaControllerState {
             .then(|| std::mem::replace(&mut self.is_playing, is_playing))
     }
 
-    /// Remember what plays now. Something else than what was paused makes
-    /// that pause old: a press must not bring it back.
+    /// Remember what plays now. Anything playing that was not paused makes the
+    /// last pause old: a press must not bring it back.
     fn heard(&mut self, playing: &[String]) {
         if playing
             .iter()
@@ -1943,9 +1943,9 @@ mod tests {
     #[test]
     fn a_player_slow_to_report_its_pause_stays_remembered() {
         let mut state = MediaControllerState::new();
-        state.paused_by_app_services = names(&[VIDEO, MIRROR]);
+        state.paused_by_app_services = names(&[VIDEO, MUSIC]);
         state.heard(&names(&[VIDEO]));
-        assert_eq!(state.paused_by_app_services, names(&[VIDEO, MIRROR]));
+        assert_eq!(state.paused_by_app_services, names(&[VIDEO, MUSIC]));
     }
 
     #[test]
