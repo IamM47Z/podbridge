@@ -727,6 +727,8 @@ fn spawn_shutdown_handler(
             let managers = device_managers.read().await;
             for dm in managers.values() {
                 if let Some(aacp) = dm.get_aacp() {
+                    // Nobody would answer a reported press once we are gone.
+                    devices::airpods::request_stem_presses(&aacp, 0).await;
                     aacp.disarm_hires_mic().await;
                 }
             }
