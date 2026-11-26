@@ -16,6 +16,13 @@ Other distributions: download the binary or the AppImage from the
 2.39 or later. The binary also needs D-Bus and the PulseAudio client library
 (`libpulse`). FFmpeg is built in.
 
+## Squeeze to pause
+
+podbridge takes the single squeeze from the AirPods over their own protocol. It
+pauses what plays, or resumes the player used last, whatever your desktop binds
+to the media keys. Other headsets and your keyboard are not touched. podbridge
+gives the squeeze back to the AirPods when it quits.
+
 ## Build
 
 Needs Rust, `pkg-config`, D-Bus, PulseAudio client and FFmpeg development

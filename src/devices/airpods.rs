@@ -52,9 +52,7 @@ impl AirPodsDevice {
         send_handshake_and_requests(&aacp_manager).await;
         restore_pending_conversation_detection(&aacp_manager).await;
         let stem_control = stem_control_enabled();
-        if stem_control {
-            enable_stem_press_detection(&aacp_manager).await;
-        }
+        request_stem_presses(&aacp_manager, stem_mask(stem_control)).await;
         restore_press_and_hold_modes(&aacp_manager, &mac_address.to_string()).await;
         restore_stored_controls(&aacp_manager, &mac_address.to_string()).await;
 
@@ -172,17 +170,15 @@ fn stem_control_enabled() -> bool {
         .unwrap_or(false)
 }
 
-async fn enable_stem_press_detection(aacp_manager: &AACPManager) {
-    // Enable stem press detection (double and triple tap)
-    // StemConfig bitmask for the control command: single=0x01, double=0x02, triple=0x04, long=0x08
-    // We want double and triple: 0x02 | 0x04 = 0x06
-    // Note: these bitmask values differ from the StemPressType event enum values (0x05–0x08)
-    info!("Enabling stem press detection for double and triple tap");
+/// Have the AirPods report the presses in `mask` (see stem_mask); 0 gives all
+/// of them back.
+pub(crate) async fn request_stem_presses(aacp_manager: &AACPManager, mask: u8) {
+    info!("Asking the AirPods to report stem presses {mask:#04x}");
     if let Err(e) = aacp_manager
-        .send_control_command(ControlCommandIdentifiers::StemConfig, &[0x06])
+        .send_control_command(ControlCommandIdentifiers::StemConfig, &[mask])
         .await
     {
-        error!("Failed to enable stem press detection: {}", e);
+        error!("Failed to set the reported stem presses: {}", e);
     }
 }
 
@@ -552,12 +548,9 @@ impl EventLoop {
     }
 
     async fn handle_stem_press(&self, press_type: &crate::bluetooth::aacp::StemPressType) {
-        if !self.stem_control {
-            debug!("Stem control disabled, ignoring stem press event");
-            return;
-        }
         // Read on each press, so a change in Settings applies at once.
-        let Some(action) = stem_action(press_type, &crate::utils::AppSettings::load()) else {
+        let settings = crate::utils::AppSettings::load();
+        let Some(action) = stem_action(press_type, &settings, self.stem_control) else {
             debug!("Unhandled stem press type: {:?}", press_type);
             return;
         };
@@ -571,17 +564,33 @@ impl EventLoop {
     }
 }
 
-/// The action the settings give a stem press. Single and long presses stay
-/// with the AirPods: podbridge only asks for double and triple presses.
+/// The presses podbridge asks the AirPods to report instead of sending their
+/// own media command: always the single one, and with stem control the double
+/// and triple ones. Bits: single 0x01, double 0x02, triple 0x04, long 0x08
+/// (not the values of the StemPressType events).
+fn stem_mask(stem_control: bool) -> u8 {
+    if stem_control {
+        0x01 | 0x02 | 0x04
+    } else {
+        0x01
+    }
+}
+
+/// What a reported press does. Long presses stay with the AirPods.
+///
+/// The single press is ours because the AirPods' own command is a guess: BlueZ
+/// tells them nothing plays here, so they send Play even to pause.
 fn stem_action(
     press: &crate::bluetooth::aacp::StemPressType,
     settings: &crate::utils::AppSettings,
+    stem_control: bool,
 ) -> Option<StemAction> {
     use crate::bluetooth::aacp::StemPressType;
     match press {
-        StemPressType::Double => Some(settings.stem_double_press),
-        StemPressType::Triple => Some(settings.stem_triple_press),
-        StemPressType::Single | StemPressType::Long => None,
+        StemPressType::Single => Some(StemAction::PlayPause),
+        StemPressType::Double if stem_control => Some(settings.stem_double_press),
+        StemPressType::Triple if stem_control => Some(settings.stem_triple_press),
+        StemPressType::Double | StemPressType::Triple | StemPressType::Long => None,
     }
 }
 
@@ -650,7 +659,7 @@ pub struct AirPodsInformation {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectRouting, stem_action};
+    use super::{ConnectRouting, stem_action, stem_mask};
     use crate::bluetooth::aacp::StemPressType;
     use crate::utils::{AppSettings, StemAction};
 
@@ -658,13 +667,38 @@ mod tests {
     fn stem_presses_default_to_next_and_previous_track() {
         let s = AppSettings::default();
         assert_eq!(
-            stem_action(&StemPressType::Double, &s),
+            stem_action(&StemPressType::Double, &s, true),
             Some(StemAction::NextTrack)
         );
         assert_eq!(
-            stem_action(&StemPressType::Triple, &s),
+            stem_action(&StemPressType::Triple, &s, true),
             Some(StemAction::PreviousTrack)
         );
+    }
+
+    #[test]
+    fn a_single_press_plays_or_pauses_whatever_the_setting() {
+        let s = AppSettings::default();
+        for stem_control in [true, false] {
+            assert_eq!(
+                stem_action(&StemPressType::Single, &s, stem_control),
+                Some(StemAction::PlayPause)
+            );
+        }
+    }
+
+    #[test]
+    fn double_and_triple_presses_need_the_setting() {
+        let s = AppSettings::default();
+        assert_eq!(stem_action(&StemPressType::Double, &s, false), None);
+        assert_eq!(stem_action(&StemPressType::Triple, &s, false), None);
+    }
+
+    #[test]
+    fn the_airpods_are_asked_for_the_presses_podbridge_handles() {
+        // Bits: single 0x01, double 0x02, triple 0x04, long 0x08.
+        assert_eq!(stem_mask(false), 0x01);
+        assert_eq!(stem_mask(true), 0x07);
     }
 
     #[test]
@@ -675,20 +709,19 @@ mod tests {
             ..AppSettings::default()
         };
         assert_eq!(
-            stem_action(&StemPressType::Double, &s),
+            stem_action(&StemPressType::Double, &s, true),
             Some(StemAction::PlayPause)
         );
         assert_eq!(
-            stem_action(&StemPressType::Triple, &s),
+            stem_action(&StemPressType::Triple, &s, true),
             Some(StemAction::NextTrack)
         );
     }
 
     #[test]
-    fn single_and_long_presses_are_left_to_the_airpods() {
+    fn long_presses_are_left_to_the_airpods() {
         let s = AppSettings::default();
-        assert_eq!(stem_action(&StemPressType::Single, &s), None);
-        assert_eq!(stem_action(&StemPressType::Long, &s), None);
+        assert_eq!(stem_action(&StemPressType::Long, &s, true), None);
     }
 
     #[test]
