@@ -89,6 +89,8 @@ struct MediaControllerState {
     hand_back: HandBack,
     /// Counts our own pauses: a playback reading that overlaps one is stale.
     own_pauses: u64,
+    /// The player last heard playing, for a press when nothing plays.
+    last_heard: Option<String>,
 }
 
 impl MediaControllerState {
@@ -116,6 +118,7 @@ impl MediaControllerState {
             conv_conversation_started: false,
             playback_listener_running: false,
             own_pauses: 0,
+            last_heard: None,
         }
     }
 
@@ -131,6 +134,20 @@ impl MediaControllerState {
     fn note_playing(&mut self, is_playing: bool, pauses_before: u64) -> Option<bool> {
         (self.own_pauses == pauses_before)
             .then(|| std::mem::replace(&mut self.is_playing, is_playing))
+    }
+
+    /// Remember what plays now. Something else than what was paused makes
+    /// that pause old: a press must not bring it back.
+    fn heard(&mut self, playing: &[String]) {
+        if playing
+            .iter()
+            .any(|s| !self.paused_by_app_services.contains(s))
+        {
+            self.paused_by_app_services.clear();
+        }
+        if let Some(service) = playing.first() {
+            self.last_heard = Some(service.clone());
+        }
     }
 }
 
@@ -212,9 +229,10 @@ impl MediaController {
             }
 
             let own_pauses = self.state.lock().await.own_pauses;
-            let is_playing = tokio::task::spawn_blocking(Self::check_if_playing)
+            let playing = tokio::task::spawn_blocking(Self::playing_players)
                 .await
-                .unwrap_or(false);
+                .unwrap_or_default();
+            let is_playing = !playing.is_empty();
             // An app opening the hi-res mic (e.g. joining a voice call) is the
             // call equivalent of "playback started": calls aren't MPRIS players,
             // so without this a call would never take the AirPods back from
@@ -228,6 +246,7 @@ impl MediaController {
             let Some(was_playing) = state.note_playing(is_playing, own_pauses) else {
                 continue;
             };
+            state.heard(&playing);
             let was_mic_active = std::mem::replace(&mut state.mic_was_active, mic_active);
             let other_was_active = std::mem::replace(&mut state.other_was_active, other_active);
             if other_active {
@@ -492,15 +511,18 @@ impl MediaController {
         self.state.lock().await.last_takeover = None;
     }
 
-    fn check_if_playing() -> bool {
-        let conn = match Connection::new_session() {
-            Ok(c) => c,
-            Err(_) => return false,
-        };
-        any_plays(
-            Self::list_mpris_services(&conn)
+    fn playing_players() -> Vec<String> {
+        match Connection::new_session() {
+            Ok(conn) => Self::playing_on(&conn),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn playing_on(conn: &Connection) -> Vec<String> {
+        playing_among(
+            Self::list_mpris_services(conn)
                 .iter()
-                .filter_map(|service| Some((service, Self::playback_status(&conn, service)?))),
+                .filter_map(|service| Some((service, Self::playback_status(conn, service)?))),
         )
     }
 
@@ -806,28 +828,17 @@ impl MediaController {
             };
             let mut paused_services = Vec::new();
 
-            for service in Self::list_mpris_services(&conn) {
-                debug!("Checking playback status for service: {}", service);
+            for service in Self::playing_on(&conn) {
                 let proxy =
                     conn.with_proxy(&service, "/org/mpris/MediaPlayer2", Duration::from_secs(5));
-
-                if let Ok(playback_status) =
-                    proxy.get::<String>("org.mpris.MediaPlayer2.Player", "PlaybackStatus")
-                    && playback_status == "Playing"
+                if proxy
+                    .method_call::<(), _, &str, &str>("org.mpris.MediaPlayer2.Player", "Pause", ())
+                    .is_ok()
                 {
-                    if proxy
-                        .method_call::<(), _, &str, &str>(
-                            "org.mpris.MediaPlayer2.Player",
-                            "Pause",
-                            (),
-                        )
-                        .is_ok()
-                    {
-                        info!("Paused playback for: {}", service);
-                        paused_services.push(service);
-                    } else {
-                        error!("Failed to pause {}", service);
-                    }
+                    info!("Paused playback for: {}", service);
+                    paused_services.push(service);
+                } else {
+                    error!("Failed to pause {}", service);
                 }
             }
 
@@ -951,21 +962,31 @@ impl MediaController {
         }
     }
 
-    /// Pause what plays, or resume what this paused. A plain PlayPause would go
-    /// to whichever player D-Bus lists first once nothing plays, which can
-    /// start a different player than the one just paused.
+    /// Pause what plays, or resume what this paused, else the player used last.
+    /// A plain PlayPause would go to whichever player D-Bus lists first once
+    /// nothing plays, which can start a different one.
     pub async fn play_pause(&self) {
         // The user took over playback: a bud going back in must not resume.
         self.state.lock().await.resume_on_reinsert = false;
         if self.pause().await {
             return;
         }
-        if self.state.lock().await.paused_by_app_services.is_empty() {
-            info!("Nothing paused by podbridge; sending PlayPause");
-            self.mpris_command("PlayPause").await;
-        } else {
-            self.resume().await;
+        let present = tokio::task::spawn_blocking(|| {
+            Connection::new_session()
+                .map(|conn| Self::list_mpris_services(&conn))
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+        {
+            let mut state = self.state.lock().await;
+            state.paused_by_app_services = resume_targets(
+                &state.paused_by_app_services,
+                &present,
+                state.last_heard.as_deref(),
+            );
         }
+        self.resume().await;
     }
 
     pub async fn next_track(&self) {
@@ -1798,11 +1819,39 @@ fn ear_actions(
 /// playerctld only mirrors another player, and can report its state late.
 const PLAYERCTLD: &str = "org.mpris.MediaPlayer2.playerctld";
 
-/// Whether any of these (service, status) players plays.
-fn any_plays<S: AsRef<str>, T: AsRef<str>>(players: impl IntoIterator<Item = (S, T)>) -> bool {
+/// The services among these (service, status) players that play.
+fn playing_among<S: AsRef<str>, T: AsRef<str>>(
+    players: impl IntoIterator<Item = (S, T)>,
+) -> Vec<String> {
     players
         .into_iter()
-        .any(|(service, status)| service.as_ref() != PLAYERCTLD && status.as_ref() == "Playing")
+        .filter(|(service, status)| service.as_ref() != PLAYERCTLD && status.as_ref() == "Playing")
+        .map(|(service, _)| service.as_ref().to_string())
+        .collect()
+}
+
+/// Which players a press starts when nothing plays: those paused last, else
+/// the one used last (playerctld knows it, where it runs).
+fn resume_targets(
+    remembered: &[String],
+    present: &[String],
+    last_heard: Option<&str>,
+) -> Vec<String> {
+    let paused: Vec<String> = remembered
+        .iter()
+        .filter(|s| present.contains(s))
+        .cloned()
+        .collect();
+    if !paused.is_empty() {
+        return paused;
+    }
+    let named = |name: &str| present.iter().find(|s| *s == name);
+    named(PLAYERCTLD)
+        .or_else(|| last_heard.and_then(named))
+        .or(present.first())
+        .cloned()
+        .into_iter()
+        .collect()
 }
 
 /// Wait until the players just paused report it. False if one still says it
@@ -1832,8 +1881,8 @@ fn one_bud_resume_pending(in_ear: &[bool], resume_on_reinsert: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        EarActions, MediaControllerState, any_plays, confirm_paused, ear_actions,
-        one_bud_resume_pending,
+        EarActions, MediaControllerState, confirm_paused, ear_actions, one_bud_resume_pending,
+        playing_among, resume_targets,
     };
     use std::time::Duration;
 
@@ -1862,12 +1911,77 @@ mod tests {
         assert!(state.is_playing);
     }
 
+    const MUSIC: &str = "org.mpris.MediaPlayer2.music";
+    const VIDEO: &str = "org.mpris.MediaPlayer2.video";
+    const MIRROR: &str = "org.mpris.MediaPlayer2.playerctld";
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn playerctld_alone_is_not_playback() {
-        let mirror = "org.mpris.MediaPlayer2.playerctld";
-        let music = "org.mpris.MediaPlayer2.music";
-        assert!(!any_plays([(mirror, "Playing"), (music, "Paused")]));
-        assert!(any_plays([(mirror, "Paused"), (music, "Playing")]));
+        assert_eq!(
+            playing_among([(MIRROR, "Playing"), (MUSIC, "Paused")]),
+            names(&[])
+        );
+        assert_eq!(
+            playing_among([(MIRROR, "Paused"), (MUSIC, "Playing")]),
+            names(&[MUSIC])
+        );
+    }
+
+    #[test]
+    fn playing_something_else_forgets_the_old_pause() {
+        let mut state = MediaControllerState::new();
+        state.paused_by_app_services = names(&[VIDEO]);
+        state.heard(&names(&[MUSIC]));
+        assert!(state.paused_by_app_services.is_empty());
+        assert_eq!(state.last_heard.as_deref(), Some(MUSIC));
+    }
+
+    #[test]
+    fn a_player_slow_to_report_its_pause_stays_remembered() {
+        let mut state = MediaControllerState::new();
+        state.paused_by_app_services = names(&[VIDEO, MIRROR]);
+        state.heard(&names(&[VIDEO]));
+        assert_eq!(state.paused_by_app_services, names(&[VIDEO, MIRROR]));
+    }
+
+    #[test]
+    fn silence_keeps_what_was_heard_and_paused() {
+        let mut state = MediaControllerState::new();
+        state.heard(&names(&[MUSIC]));
+        state.paused_by_app_services = names(&[MUSIC]);
+        state.heard(&[]);
+        assert_eq!(state.paused_by_app_services, names(&[MUSIC]));
+        assert_eq!(state.last_heard.as_deref(), Some(MUSIC));
+    }
+
+    #[test]
+    fn play_resumes_the_players_paused_last() {
+        let present = names(&[MUSIC, VIDEO, MIRROR]);
+        assert_eq!(
+            resume_targets(&names(&[VIDEO]), &present, Some(MUSIC)),
+            names(&[VIDEO])
+        );
+    }
+
+    #[test]
+    fn play_without_a_pause_goes_to_the_player_used_last() {
+        let with_mirror = names(&[MUSIC, MIRROR]);
+        assert_eq!(
+            resume_targets(&[], &with_mirror, Some(MUSIC)),
+            names(&[MIRROR])
+        );
+        let without = names(&[VIDEO, MUSIC]);
+        assert_eq!(resume_targets(&[], &without, Some(MUSIC)), names(&[MUSIC]));
+        // The remembered player quit.
+        assert_eq!(
+            resume_targets(&names(&[MIRROR]), &names(&[VIDEO]), Some(MUSIC)),
+            names(&[VIDEO])
+        );
+        assert_eq!(resume_targets(&[], &[], None), names(&[]));
     }
 
     #[test]
