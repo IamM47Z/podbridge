@@ -1339,6 +1339,39 @@ mod tests {
             .expect("nothing queued");
     }
 
+    #[tokio::test]
+    async fn stem_presses_are_handed_back_only_over_a_live_channel() {
+        use super::*;
+        // Control command 0x39 with value 0: no press is reported any more.
+        let hand_back = vec![0x04, 0x00, 0x04, 0x00, 0x09, 0x00, 0x39, 0, 0, 0, 0];
+        for (live, expected) in [(false, vec![]), (true, vec![hand_back])] {
+            let manager = AACPManager::new();
+            manager.connected.send_replace(live);
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(16);
+            manager.state.lock().await.sender = Some(tx);
+            // Stands in for send_thread: collects the writes, then reports done.
+            let done = manager.sent_all.clone();
+            let writer = tokio::spawn(async move {
+                let mut written = Vec::new();
+                while let Some(packet) = rx.recv().await {
+                    written.push(packet);
+                }
+                done.notify_one();
+                written
+            });
+
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                crate::devices::airpods::hand_back_stem_presses(&manager),
+            )
+            .await
+            .expect("handing back ends");
+
+            manager.state.lock().await.sender = None;
+            assert_eq!(writer.await.unwrap(), expected, "live channel: {live}");
+        }
+    }
+
     #[test]
     fn le_keys_debug_hides_key_material() {
         let keys = AirPodsLEKeys {

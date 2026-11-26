@@ -782,8 +782,7 @@ fn spawn_shutdown_handler(
             // a reported press once we are gone.
             for dm in managers.values() {
                 if let Some(aacp) = dm.get_aacp() {
-                    devices::airpods::request_stem_presses(&aacp, 0).await;
-                    aacp.flush().await;
+                    devices::airpods::hand_back_stem_presses(&aacp).await;
                 }
             }
         };

@@ -182,6 +182,16 @@ pub(crate) async fn request_stem_presses(aacp_manager: &AACPManager, mask: u8) {
     }
 }
 
+/// Give the stem presses back to the AirPods and wait until that is written:
+/// for use just before quitting. A link that is down cannot carry it.
+pub(crate) async fn hand_back_stem_presses(aacp_manager: &AACPManager) {
+    if !aacp_manager.is_connected() {
+        return;
+    }
+    request_stem_presses(aacp_manager, 0).await;
+    aacp_manager.flush().await;
+}
+
 /// The AirPods forget the press-and-hold modes when they join an Apple device
 /// that is not iCloud-synced; send the ones chosen here again.
 async fn restore_press_and_hold_modes(aacp_manager: &AACPManager, mac: &str) {
