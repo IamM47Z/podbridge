@@ -547,7 +547,34 @@ impl EventLoop {
         }
     }
 
+    /// Mute or unmute the AirPods microphone and say so: the recording app
+    /// may not show it.
+    async fn toggle_mic_mute(&self) {
+        let muted = self.aacp.toggle_mic_mute();
+        let state = if muted { "muted" } else { "on" };
+        info!("Single press during a recording: microphone {state}");
+        let done = tokio::task::spawn_blocking(move || {
+            use crate::audio::output;
+            let done = output::set_source_mute(output::SOURCE_NAME, muted);
+            if done {
+                let summary = format!("AirPods microphone {state}");
+                crate::devices::low_battery::notify(&summary, "");
+            }
+            done
+        })
+        .await
+        .unwrap_or(false);
+        if !done {
+            log::warn!("Could not change the microphone mute");
+            self.aacp.toggle_mic_mute();
+        }
+    }
+
     async fn handle_stem_press(&self, press_type: &crate::bluetooth::aacp::StemPressType) {
+        if mutes_mic(press_type, self.aacp.mic_active()) {
+            self.toggle_mic_mute().await;
+            return;
+        }
         // Read on each press, so a change in Settings applies at once.
         let settings = crate::utils::AppSettings::load();
         let Some(action) = stem_action(press_type, &settings, self.stem_control) else {
@@ -574,6 +601,12 @@ fn stem_mask(stem_control: bool) -> u8 {
     } else {
         0x01
     }
+}
+
+/// Whether this press mutes the microphone instead of its usual action. A call
+/// on this computer is a recording the AirPods know nothing about.
+fn mutes_mic(press: &crate::bluetooth::aacp::StemPressType, recording: bool) -> bool {
+    recording && matches!(press, crate::bluetooth::aacp::StemPressType::Single)
 }
 
 /// What a reported press does. Long presses stay with the AirPods.
@@ -659,7 +692,7 @@ pub struct AirPodsInformation {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectRouting, stem_action, stem_mask};
+    use super::{ConnectRouting, mutes_mic, stem_action, stem_mask};
     use crate::bluetooth::aacp::StemPressType;
     use crate::utils::{AppSettings, StemAction};
 
@@ -692,6 +725,13 @@ mod tests {
         let s = AppSettings::default();
         assert_eq!(stem_action(&StemPressType::Double, &s, false), None);
         assert_eq!(stem_action(&StemPressType::Triple, &s, false), None);
+    }
+
+    #[test]
+    fn a_single_press_mutes_while_the_airpods_mic_records() {
+        assert!(mutes_mic(&StemPressType::Single, true));
+        assert!(!mutes_mic(&StemPressType::Single, false));
+        assert!(!mutes_mic(&StemPressType::Double, true));
     }
 
     #[test]

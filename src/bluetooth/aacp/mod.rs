@@ -298,6 +298,11 @@ impl AACPManager {
         self.mic_status.active()
     }
 
+    /// Flip the squeeze mute of the microphone; true when it is now muted.
+    pub fn toggle_mic_mute(&self) -> bool {
+        self.mic_status.toggle_squeeze_mute()
+    }
+
     pub fn mic_app(&self) -> Option<String> {
         self.mic_status.app()
     }

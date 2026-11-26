@@ -701,6 +701,26 @@ pub fn set_default_source(name: &str) -> bool {
     ok.get()
 }
 
+/// Mute or unmute the source `name`, as the desktop's microphone mute does.
+pub fn set_source_mute(name: &str, muted: bool) -> bool {
+    let Some((mut mainloop, context)) = connect() else {
+        return false;
+    };
+    let ok = Rc::new(Cell::new(false));
+    let op = context.introspect().set_source_mute_by_name(
+        name,
+        muted,
+        Some(Box::new({
+            let ok = ok.clone();
+            move |success| ok.set(success)
+        })),
+    );
+    wait_op(&mut mainloop, &op);
+    drop(op);
+    mainloop.quit(Retval(0));
+    ok.get()
+}
+
 /// The microphone to send apps to while ours can't deliver audio: the real
 /// (non-monitor) source with the highest session priority other than `exclude`,
 /// i.e. the one the session manager would fall back to.
