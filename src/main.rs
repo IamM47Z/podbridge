@@ -762,10 +762,29 @@ fn spawn_shutdown_handler(
                 None => std::future::pending().await,
             }
         };
-        tokio::select! {
-            _ = shutdown_rx.recv() => {}
-            _ = sigterm => {}
-            _ = sigint => {}
+        tokio::pin!(sigterm, sigint);
+        let from_menu = tokio::select! {
+            _ = shutdown_rx.recv() => true,
+            _ = &mut sigterm => false,
+            _ = &mut sigint => false,
+        };
+
+        // Only a quit from the menu can wait: systemd gives a stop a few
+        // seconds, so after a signal the mute is left to the next start. The
+        // wait comes before the teardown, so the monitor keeps counting and
+        // the AirPods can still reconnect.
+        if from_menu && audio::mic_mute::pending() {
+            info!("Waiting for the microphone mute to end before quitting");
+            let wait = tokio::time::timeout(
+                audio::mic_mute::LONGEST_EXIT_WAIT,
+                audio::mic_mute::end_before_exit(),
+            );
+            // A stop by the system meanwhile ends the wait.
+            tokio::select! {
+                _ = wait => {}
+                _ = &mut sigterm => {}
+                _ = &mut sigint => {}
+            }
         }
 
         info!("Shutting down: tearing down hi-res mic streams...");

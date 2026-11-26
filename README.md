@@ -26,8 +26,10 @@ gives the squeeze back to the AirPods when it quits normally.
 While an app records from the AirPods microphone, as in a call, a squeeze mutes
 and unmutes the microphone instead. A notification says which. While an app
 still records, the mute stays, even with the buds out or the AirPods gone. It
-ends about ten seconds after the recording does, or at the next start if
-podbridge quit meanwhile.
+ends about ten seconds after the recording does. Quitting from the tray menu
+waits for that, up to about twelve seconds, and does not wait while an app
+records. After a stop by a signal, such as a service restart or Ctrl-C, it ends
+at the next start.
 
 ## Build
 
